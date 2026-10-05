@@ -11,3 +11,9 @@ path = ["README.md", "THIRD-PARTY-NOTICES", "REUSE.toml", ".gitignore", ".gitmod
 precedence = "aggregate"
 SPDX-FileCopyrightText = "2026 Zak Noble-Clarke"
 SPDX-License-Identifier = "MIT"
+
+[[annotations]]
+path = ["sources.list", "tests/fixtures/*.bin"]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2026 Zak Noble-Clarke"
+SPDX-License-Identifier = "MIT"
