@@ -1,36 +1,17 @@
 THIRD-PARTY NOTICES: mx-guest-core
 
-This file lists third-party work carried in this repository or shipped
-from it, with the SPDX licence identifier, the copyright holders and the
-source location of each.
-
-
 THIRD-PARTY WORK CARRIED IN THIS REPOSITORY
 
-None. At present this repository carries no third-party work. Every file
-in it other than the licence texts (LICENCE and LICENSES/) is MX's
-own work, licensed under MIT (SPDX identifier MIT),
-copyright 2026 Zak Noble-Clarke, as stated in each file's SPDX header or
-in REUSE.toml.
-
+None. Repository-owned files are MX work, licensed MIT and
+copyright 2026 Zak Noble-Clarke, as recorded in their SPDX headers or
+REUSE.toml. Licence texts are retained in LICENCE and LICENSES/.
 
 MX DEPENDENCIES
 
-None. Core has no dependencies, including on other MX repositories.
-
+None. This repository carries no dependency submodules.
 
 BUILD INPUTS, NOT REDISTRIBUTED
 
-None.
-
-
-WHEN AN ENTRY MUST BE ADDED
-
-A build-time dependency creates no notice obligation. A shipped copy
-creates one immediately. As soon as any third-party file, fragment,
-vendored library or generated artefact derived from third-party work is
-placed in this repository, or shipped from it, it must be listed here in
-the same commit, with its original notices kept intact. A dependency that
-is used only at build time and never copied into the repository or into
-anything distributed from it is listed under "Build inputs, not
-redistributed", with the reason it creates no obligation.
+The C compiler, Make and C library for CPU tests are supplied by the
+build environment. Kernel consumers use their target kernel's type and
+string headers. These tools and headers are not bundled here.
