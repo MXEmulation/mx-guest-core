@@ -269,6 +269,36 @@ static void test_roundtrip(const char *dir)
     expect(mxgpu_resource_create_decode(out, n, 64ull * 1024ull * 1024ull, &resource) == MX_OK,
            "resource decode");
 
+    {
+        struct mxgpu_resource_create mip_resource = resource;
+        uint32_t bit;
+        mip_resource.kind = MXGPU_KIND_TEXTURE_1D;
+        mip_resource.height = 1;
+        mip_resource.byte_size = UINT64_MAX;
+        for (bit = 0; bit < 32; bit++) {
+            mip_resource.width = UINT32_C(1) << bit;
+            mip_resource.mip_levels = (uint16_t)(bit + 1);
+            expect(mxgpu_resource_create_encode(&mip_resource, UINT64_MAX, out, sizeof out,
+                                                &n) == MX_OK,
+                   "power of two maximum mip count accepted");
+            mip_resource.mip_levels++;
+            expect(mxgpu_resource_create_encode(&mip_resource, UINT64_MAX, out, sizeof out,
+                                                &n) == MX_ERR_SHAPE,
+                   "power of two excessive mip count refused");
+            if (bit > 0) {
+                mip_resource.width--;
+                mip_resource.mip_levels = (uint16_t)bit;
+                expect(mxgpu_resource_create_encode(&mip_resource, UINT64_MAX, out, sizeof out,
+                                                    &n) == MX_OK,
+                       "below power of two maximum mip count accepted");
+                mip_resource.mip_levels++;
+                expect(mxgpu_resource_create_encode(&mip_resource, UINT64_MAX, out, sizeof out,
+                                                    &n) == MX_ERR_SHAPE,
+                       "below power of two excessive mip count refused");
+            }
+        }
+    }
+
     memset(poison, 0xa5, sizeof poison);
     resource.resource_id = 0;
     status = mxgpu_resource_create_encode(&resource, 64ull * 1024ull * 1024ull, poison,

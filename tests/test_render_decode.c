@@ -55,7 +55,7 @@ int main(int argc, char **argv)
     struct mxgpu_execution_binding bindings[32], output[32], untouched[32];
     uint8_t wire[4096], damaged[4096];
     union {
-        max_align_t alignment;
+        struct mxgpu_render_extended alignment;
         uint8_t bytes[8192];
     } alias;
     uint32_t size, i, bit, checks = 0;

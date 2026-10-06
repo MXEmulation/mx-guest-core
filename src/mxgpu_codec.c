@@ -425,7 +425,11 @@ static int resource_shape_ok(const struct mxgpu_resource_create *in, uint64_t ma
         edge = in->height;
     if (in->kind == MXGPU_KIND_TEXTURE_3D && in->depth > edge)
         edge = in->depth;
-    max_mips = 32u - (uint32_t)__builtin_clz(edge);
+    max_mips = 0;
+    do {
+        max_mips++;
+        edge >>= 1;
+    } while (edge != 0);
     if (in->mip_levels > max_mips)
         return MX_ERR_SHAPE;
     bpp = mxgpu_format_bytes_per_pixel(in->format);

@@ -283,7 +283,7 @@ static void coverage_tests(void)
                 if (cells[y][x] != 1)
                     exact = 0;
         result = mxga_encode_integration_status(&test, payload, sizeof payload, &bytes);
-        assert((result == MXGA_OK) == exact);
+        assert((result == MXGA_OK) == (exact != 0));
         if (exact) {
             accepted++;
             assert(decode(payload, bytes) == MXGA_OK);
