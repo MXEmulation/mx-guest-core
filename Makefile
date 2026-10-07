@@ -12,7 +12,7 @@ HEADERS = $(filter %.h,$(MANIFEST))
 
 .PHONY: test clean
 
-test: build/test_protocol build/test_mxga build/test_mxga_integration build/test_cursor build/test_render_decode build/test_mxsb_verify build/test_mxio
+test: build/test_protocol build/test_mxga build/test_mxga_integration build/test_cursor build/test_render_decode build/test_mxsb_verify build/test_mxio build/test_aperture
 	./build/test_protocol tests/fixtures
 	./build/test_mxga
 	./build/test_mxga_integration
@@ -20,6 +20,7 @@ test: build/test_protocol build/test_mxga build/test_mxga_integration build/test
 	./build/test_render_decode
 	./build/test_mxsb_verify
 	./build/test_mxio
+	./build/test_aperture
 
 build/test_protocol: tests/test_protocol.c $(SRCS) $(HEADERS) sources.list
 	mkdir -p build
@@ -48,6 +49,10 @@ build/test_mxsb_verify: tests/test_mxsb_verify.c src/mxsb_codec.c $(HEADERS) sou
 build/test_mxio: tests/test_mxio.c src/mxio_codec.c $(HEADERS) sources.list
 	mkdir -p build
 	$(CC) $(CPPFLAGS) $(CFLAGS) tests/test_mxio.c src/mxio_codec.c $(LDFLAGS) -o $@
+
+build/test_aperture: tests/test_aperture.c src/mxgpu_aperture_codec.c $(HEADERS) sources.list
+	mkdir -p build
+	$(CC) $(CPPFLAGS) $(CFLAGS) tests/test_aperture.c src/mxgpu_aperture_codec.c $(LDFLAGS) -o $@
 
 clean:
 	rm -rf build

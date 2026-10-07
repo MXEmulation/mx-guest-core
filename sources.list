@@ -3,6 +3,7 @@ src/mxsb_codec.c
 src/mxga_codec.c
 src/mxga_integration.c
 src/mxio_codec.c
+src/mxgpu_aperture_codec.c
 src/mx_le.h
 include/mx_versions.h
 include/mxgpu_wire.h
@@ -10,6 +11,7 @@ include/mxgpu_transport_abi.h
 include/mxsb.h
 include/mxga.h
 include/mxio.h
+include/mxgpu_aperture.h
 tests/test_protocol.c
 tests/test_mxga.c
 tests/test_mxga_integration.c
@@ -17,3 +19,4 @@ tests/test_cursor.c
 tests/test_render_decode.c
 tests/test_mxsb_verify.c
 tests/test_mxio.c
+tests/test_aperture.c
