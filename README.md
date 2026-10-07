@@ -1,13 +1,14 @@
 <!-- REUSE-IgnoreStart -->
 # mx-guest-core
 
-Freestanding C11 encoders, decoders and validators for the MXGPU command protocol, MXSB shader bytecode and MXGA guest-agent frames.
+Freestanding C11 encoders, decoders and validators for the MXGPU command protocol, MXSB shader bytecode, MXGA guest-agent frames and MXIO transport records.
 
 ## Protocol surface
 
 - MXGPU negotiation, transport constants, command and completion records, resources, transfers, rendering, presentation and cursor updates.
 - MXSB module record writers and validation for the supported vertex and fragment instruction subset.
 - MXGA frames, system statistics, integration inventories and window actions.
+- MXIO PCI capabilities and direct-descriptor split-ring records.
 
 Command and shader instruction coverage is incomplete. Public declarations are in [`include/`](include/), and protocol versions and PCI identities are in [`include/mx_versions.h`](include/mx_versions.h). Wire records are little-endian and validated before encoding.
 
