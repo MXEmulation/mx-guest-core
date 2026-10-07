@@ -5,6 +5,7 @@
 #include "mxgpu_wire.h"
 
 #define MXGPU_POWER_ON_SNAPSHOT_SIZE (MXGPU_AREG_POWER_ON_FORMAT + 4u - MXGPU_AREG_POWER_ON_BASE_LOW)
+#define MXGPU_FIRMWARE_SCANOUT_ID 0u
 struct mxgpu_power_on_aperture {
     uint64_t base;
     uint64_t bytes;

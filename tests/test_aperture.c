@@ -5,6 +5,8 @@
 #include <assert.h>
 #include <string.h>
 
+_Static_assert(MXGPU_FIRMWARE_SCANOUT_ID == 0u, "firmware scanout ordinal");
+
 int main(void)
 {
     uint8_t bytes[MXGPU_POWER_ON_SNAPSHOT_SIZE]={0};
