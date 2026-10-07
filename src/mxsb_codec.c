@@ -34,7 +34,7 @@ static uint32_t opcode_minor(uint16_t opcode)
         return 1;
     if (opcode == 23)
         return 2;
-    if (opcode == MXSB_OP_TEXTURE_SAMPLE_BOUND)
+    if (opcode == MXSB_OP_VERTEX_ATTRIBUTE || opcode == MXSB_OP_TEXTURE_SAMPLE_BOUND)
         return 5;
     if (opcode >= 36 && opcode <= 48)
         return 6;
@@ -51,11 +51,26 @@ static uint32_t opcode_minor(uint16_t opcode)
     return 0xffffu;
 }
 
+static int record_words_ok(uint16_t opcode, uint32_t words);
+
+int mxsb_opcode_minimum_minor(uint16_t opcode, uint16_t *minor)
+{
+    uint32_t value,words;
+    if (!minor) return MXSB_ERR_STRUCTURE;
+    value=opcode_minor(opcode);
+    if (value == 0xffffu) return MXSB_ERR_OPCODE;
+    for (words=1;words<=14u;++words) if (record_words_ok(opcode,words)) break;
+    if (words > 14u) return MXSB_ERR_OPCODE;
+    *minor=(uint16_t)value;
+    return MXSB_OK;
+}
+
 static int record_words_ok(uint16_t opcode, uint32_t words)
 {
     switch (opcode) {
     case MXSB_OP_CONSTANT:
     case MXSB_OP_BUILTIN:
+    case MXSB_OP_VERTEX_ATTRIBUTE:
     case MXSB_OP_DDX:
     case MXSB_OP_DDY:
     case MXSB_OP_FWIDTH:
@@ -128,6 +143,58 @@ static int record_words_ok(uint16_t opcode, uint32_t words)
 static int opcode_has_result(uint16_t opcode)
 {
     return opcode < 0x100u && opcode != MXSB_OP_STAGE_OUTPUT;
+}
+
+static int interface_type(uint32_t type)
+{
+    return type >= MXSB_TYPE_I32 && type <= MXSB_TYPE_F32X4;
+}
+
+static int interface_record(const uint8_t *bytes, uint32_t base, uint32_t cursor,
+    uint16_t opcode, uint32_t stage, uint32_t root, uint16_t minor)
+{
+    uint32_t prior=base+4u;
+    uint32_t location=mx_r32(bytes,(cursor+(opcode == MXSB_OP_STAGE_OUTPUT ? 1u : 3u))*4u);
+    if (mx_r32(bytes,base*4u) != root) return MXSB_ERR_STRUCTURE;
+    if (opcode == MXSB_OP_STAGE_INPUT) {
+        uint32_t type=mx_r32(bytes,(cursor+2u)*4u), interpolation=mx_r32(bytes,(cursor+4u)*4u);
+        if (stage != MXSB_STAGE_FRAGMENT) return MXSB_ERR_STAGE;
+        if (!interface_type(type) || interpolation < MXSB_INTERP_PERSPECTIVE ||
+            interpolation > MXSB_INTERP_FLAT ||
+            (interpolation != MXSB_INTERP_FLAT && type != MXSB_TYPE_F32 &&
+             (type < MXSB_TYPE_F32X2 || type > MXSB_TYPE_F32X4))) return MXSB_ERR_TYPE;
+    } else if (opcode == MXSB_OP_VERTEX_ATTRIBUTE) {
+        if (stage != MXSB_STAGE_VERTEX) return MXSB_ERR_STAGE;
+        if (!interface_type(mx_r32(bytes,(cursor+2u)*4u))) return MXSB_ERR_TYPE;
+    } else if (stage == MXSB_STAGE_FRAGMENT) {
+        if (minor < MXSB_FRAGMENT_STAGE_OUTPUT_MINIMUM_MINOR) return MXSB_ERR_STAGE;
+        if (!location || location >= MXSB_MAX_COLOR_ATTACHMENTS) return MXSB_ERR_VALUE;
+    } else if (stage != MXSB_STAGE_VERTEX) return MXSB_ERR_STAGE;
+    if (opcode != MXSB_OP_VERTEX_ATTRIBUTE && location >= MXSB_MAX_STAGE_INTERFACE_LOCATIONS)
+        return MXSB_ERR_VALUE;
+    while (prior < cursor) {
+        uint32_t head=mx_r32(bytes,prior*4u);
+        if ((uint16_t)head == opcode &&
+            mx_r32(bytes,(prior+(opcode == MXSB_OP_STAGE_OUTPUT ? 1u : 3u))*4u) == location)
+            return MXSB_ERR_VALUE;
+        prior+=head>>16;
+    }
+    if (opcode == MXSB_OP_STAGE_OUTPUT) {
+        uint32_t value=mx_r32(bytes,(cursor+2u)*4u), found=0;
+        prior=base+4u;
+        while (prior < cursor) {
+            uint32_t head=mx_r32(bytes,prior*4u);
+            if (opcode_has_result((uint16_t)head) && mx_r32(bytes,(prior+1u)*4u) == value) {
+                uint32_t type=mx_r32(bytes,(prior+2u)*4u);
+                if (!interface_type(type) || (stage == MXSB_STAGE_FRAGMENT && type != MXSB_TYPE_F32X4))
+                    return MXSB_ERR_TYPE;
+                found=1;
+            }
+            prior+=head>>16;
+        }
+        if (!found) return MXSB_ERR_VALUE;
+    }
+    return MXSB_OK;
 }
 
 static uint32_t binding_word(const uint8_t *bytes, uint32_t index, uint32_t field)
@@ -288,6 +355,7 @@ int mxsb_verify(const uint8_t *bytes, uint32_t len, const struct mxsb_limits *li
         uint32_t entry;
         uint32_t local;
         uint32_t stage = 0;
+        uint32_t root = 0;
         uint32_t found = 0;
         uint32_t r;
         if (words - cursor < 4)
@@ -301,6 +369,7 @@ int mxsb_verify(const uint8_t *bytes, uint32_t len, const struct mxsb_limits *li
         for (local = 0; local < entries; local++) {
             if (mx_r32(bytes, (entry_base + local * MXSB_ENTRY_WORDS) * 4u) == entry) {
                 stage = mx_r32(bytes, (entry_base + local * MXSB_ENTRY_WORDS + 1u) * 4u);
+                root = mx_r32(bytes, (entry_base + local * MXSB_ENTRY_WORDS + 2u) * 4u);
                 found = 1;
             }
         }
@@ -344,10 +413,13 @@ int mxsb_verify(const uint8_t *bytes, uint32_t len, const struct mxsb_limits *li
                 return MXSB_ERR_STAGE;
             if (opcode == MXSB_OP_STAGE_INPUT && stage != MXSB_STAGE_FRAGMENT)
                 return MXSB_ERR_STAGE;
-            if (opcode == MXSB_OP_STAGE_OUTPUT && stage != MXSB_STAGE_VERTEX)
-                return MXSB_ERR_STAGE;
             if (opcode == MXSB_OP_BUILTIN && stage != MXSB_STAGE_VERTEX)
                 return MXSB_ERR_STAGE;
+            if (opcode == MXSB_OP_STAGE_INPUT || opcode == MXSB_OP_STAGE_OUTPUT ||
+                opcode == MXSB_OP_VERTEX_ATTRIBUTE) {
+                int interface_status=interface_record(bytes,block_base,cursor,opcode,stage,root,minor);
+                if (interface_status != MXSB_OK) return interface_status;
+            }
             if (opcode >= MXSB_OP_DDX && opcode <= MXSB_OP_FWIDTH) {
                 uint32_t type = mx_r32(bytes, (cursor + 2) * 4u);
                 uint32_t value = mx_r32(bytes, (cursor + 3) * 4u);

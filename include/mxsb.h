@@ -52,6 +52,7 @@
 #define MXSB_OP_BITCAST 62u
 #define MXSB_OP_STAGE_INPUT 21u
 #define MXSB_OP_STAGE_OUTPUT 22u
+#define MXSB_OP_VERTEX_ATTRIBUTE 34u
 #define MXSB_OP_TEXTURE_SAMPLE 23u
 #define MXSB_OP_TEXTURE_SAMPLE_BOUND 35u
 #define MXSB_OP_TEXTURE_SAMPLE_LOD 65u
@@ -66,8 +67,15 @@
 #define MXSB_OP_RETURN_VALUE 0x101u
 #define MXSB_OP_DISCARD 0x105u
 #define MXSB_TYPE_BOOL 1u
+#define MXSB_TYPE_I32 2u
 #define MXSB_TYPE_U32 3u
 #define MXSB_TYPE_F32 4u
+#define MXSB_TYPE_I32X2 5u
+#define MXSB_TYPE_I32X3 6u
+#define MXSB_TYPE_I32X4 7u
+#define MXSB_TYPE_U32X2 8u
+#define MXSB_TYPE_U32X3 9u
+#define MXSB_TYPE_U32X4 10u
 #define MXSB_TYPE_F32X2 11u
 #define MXSB_TYPE_F32X3 12u
 #define MXSB_TYPE_F32X4 13u
@@ -80,6 +88,11 @@
 #define MXSB_ACCESS_READ 1u
 #define MXSB_BUILTIN_VERTEX_ID 4u
 #define MXSB_INTERP_PERSPECTIVE 1u
+#define MXSB_INTERP_NO_PERSPECTIVE 2u
+#define MXSB_INTERP_FLAT 3u
+#define MXSB_MAX_STAGE_INTERFACE_LOCATIONS 127u
+#define MXSB_MAX_COLOR_ATTACHMENTS 8u
+#define MXSB_FRAGMENT_STAGE_OUTPUT_MINIMUM_MINOR 5u
 
 enum mxsb_status {
     MXSB_OK = 0,
@@ -116,6 +129,8 @@ struct mxsb_writer {
 };
 
 int mxsb_limits_default(struct mxsb_limits *out);
+/* Refuses instructions not implemented by the verifier. Failure preserves minor. */
+int mxsb_opcode_minimum_minor(uint16_t opcode, uint16_t *minor);
 int mxsb_verify(const uint8_t *bytes, uint32_t len, const struct mxsb_limits *limits);
 int mxsb_writer_init(struct mxsb_writer *writer, uint32_t *words, uint32_t capacity,
                      uint16_t minor);

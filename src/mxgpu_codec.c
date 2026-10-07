@@ -120,6 +120,8 @@ int mxgpu_opcode_queue(uint16_t opcode, uint16_t *queue)
     case MXGPU_OP_RASTERIZER_STATE_DESTROY:
     case MXGPU_OP_SAMPLER_CREATE:
     case MXGPU_OP_SAMPLER_DESTROY:
+    case MXGPU_OP_VERTEX_LAYOUT_CREATE:
+    case MXGPU_OP_VERTEX_LAYOUT_DESTROY:
     case MXGPU_OP_TIMELINE_WAIT:
         q = MXGPU_QUEUE_CONTROL;
         break;
