@@ -618,6 +618,23 @@ int mxgpu_render_submit_encode(const struct mxgpu_render_submit *in,
                                uint32_t cap, uint32_t *out_len);
 int mxgpu_render_submit_decode(const uint8_t *in, uint32_t len, struct mxgpu_render_submit *out,
                                struct mxgpu_execution_binding *bindings, uint32_t binding_cap);
+#define MXGPU_OP_COMPUTE_SUBMIT 0x0200u
+#define MXGPU_COMPUTE_SUBMIT_HEADER_SIZE 32u
+#define MXGPU_DISPATCH_THREADS 1u
+#define MXGPU_DISPATCH_THREADGROUPS 2u
+struct mxgpu_compute_submit {
+    uint32_t pipeline_id;
+    uint16_t binding_count;
+    uint16_t dispatch_kind;
+    uint32_t dimensions[3];
+};
+int mxgpu_compute_submit_features(uint64_t features);
+int mxgpu_compute_submit_encode(const struct mxgpu_compute_submit *in,
+                                const struct mxgpu_execution_binding *bindings, uint8_t *out,
+                                uint32_t cap, uint32_t *out_len);
+int mxgpu_compute_submit_decode(const uint8_t *in, uint32_t len, struct mxgpu_compute_submit *out,
+                                struct mxgpu_execution_binding *bindings, uint32_t binding_cap);
+
 int mxgpu_present_encode(const struct mxgpu_present *in, uint8_t *out, uint32_t cap,
                          uint32_t *out_len);
 int mxgpu_present_decode(const uint8_t *in, uint32_t len, struct mxgpu_present *out,

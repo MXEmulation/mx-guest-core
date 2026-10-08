@@ -103,6 +103,9 @@ int mxgpu_opcode_queue(uint16_t opcode, uint16_t *queue)
     case MXGPU_OP_COLOR_CLEAR:
         q = MXGPU_QUEUE_RENDER;
         break;
+    case MXGPU_OP_COMPUTE_SUBMIT:
+        q = MXGPU_QUEUE_COMPUTE;
+        break;
     case MXGPU_OP_TRANSFER_TO_HOST:
     case MXGPU_OP_TRANSFER_FROM_HOST:
         q = MXGPU_QUEUE_TRANSFER;
@@ -1220,6 +1223,121 @@ int mxgpu_render_submit_decode(const uint8_t *in, uint32_t len, struct mxgpu_ren
         return MX_ERR_RESOURCE;
     if (rec.element_count < 3 || rec.instance_count == 0)
         return MX_ERR_RANGE;
+    *out = rec;
+    return MX_OK;
+}
+
+static int bindings_unique(const struct mxgpu_execution_binding *bindings, uint32_t count)
+{
+    uint32_t i, j;
+    for (i = 0; i < count; i++) {
+        for (j = i + 1; j < count; j++) {
+            if (bindings[i].space == bindings[j].space && bindings[i].slot == bindings[j].slot)
+                return 0;
+        }
+    }
+    return 1;
+}
+
+static int compute_dimensions_ok(const uint32_t dimensions[3])
+{
+    uint64_t plane;
+    if (dimensions[0] == 0 || dimensions[1] == 0 || dimensions[2] == 0)
+        return 0;
+    plane = (uint64_t)dimensions[0] * dimensions[1];
+    return dimensions[2] <= UINT64_MAX / plane;
+}
+
+static int compute_dispatch_kind_ok(uint16_t kind)
+{
+    return kind == MXGPU_DISPATCH_THREADS || kind == MXGPU_DISPATCH_THREADGROUPS;
+}
+
+int mxgpu_compute_submit_features(uint64_t features)
+{
+    return (features & MXGPU_FEAT_COMPUTE) ? MX_OK : MX_ERR_FEATURE;
+}
+
+int mxgpu_compute_submit_encode(const struct mxgpu_compute_submit *in,
+                                const struct mxgpu_execution_binding *bindings, uint8_t *out,
+                                uint32_t cap, uint32_t *out_len)
+{
+    uint32_t total;
+    uint32_t i;
+    if (!in || in->pipeline_id == 0)
+        return fail(out_len, MX_ERR_RESOURCE);
+    if (!compute_dispatch_kind_ok(in->dispatch_kind))
+        return fail(out_len, MX_ERR_STATE);
+    if (!compute_dimensions_ok(in->dimensions))
+        return fail(out_len, MX_ERR_RANGE);
+    if (in->binding_count && !bindings)
+        return fail(out_len, MX_ERR_STATE);
+    for (i = 0; i < in->binding_count; i++) {
+        if (binding_ok(&bindings[i]) != MX_OK)
+            return fail(out_len, MX_ERR_BINDING);
+    }
+    if (!bindings_unique(bindings, in->binding_count))
+        return fail(out_len, MX_ERR_BINDING);
+    total = MXGPU_COMPUTE_SUBMIT_HEADER_SIZE + in->binding_count * MXGPU_EXECUTION_BINDING_SIZE;
+    if (out_len)
+        *out_len = 0;
+    if (!out || cap < total)
+        return MX_ERR_LENGTH;
+    memset(out, 0, total);
+    mx_w32(out, 0, in->pipeline_id);
+    mx_w16(out, 4, in->binding_count);
+    mx_w16(out, 6, in->dispatch_kind);
+    for (i = 0; i < 3; i++)
+        mx_w32(out, 8 + i * 4, in->dimensions[i]);
+    for (i = 0; i < in->binding_count; i++) {
+        uint32_t wrote = 0;
+        if (mxgpu_binding_encode(&bindings[i],
+                                 out + MXGPU_COMPUTE_SUBMIT_HEADER_SIZE +
+                                     i * MXGPU_EXECUTION_BINDING_SIZE,
+                                 MXGPU_EXECUTION_BINDING_SIZE, &wrote) != MX_OK)
+            return fail(out_len, MX_ERR_BINDING);
+    }
+    if (out_len)
+        *out_len = total;
+    return MX_OK;
+}
+
+int mxgpu_compute_submit_decode(const uint8_t *in, uint32_t len, struct mxgpu_compute_submit *out,
+                                struct mxgpu_execution_binding *bindings, uint32_t binding_cap)
+{
+    struct mxgpu_compute_submit rec;
+    uint32_t i;
+    if (!in || !out)
+        return MX_ERR_STATE;
+    if (len < MXGPU_COMPUTE_SUBMIT_HEADER_SIZE)
+        return MX_ERR_LENGTH;
+    memset(&rec, 0, sizeof rec);
+    rec.pipeline_id = mx_r32(in, 0);
+    if (rec.pipeline_id == 0)
+        return MX_ERR_RESOURCE;
+    rec.binding_count = mx_r16(in, 4);
+    if (rec.binding_count > binding_cap || (rec.binding_count && !bindings))
+        return MX_ERR_LIMIT;
+    rec.dispatch_kind = mx_r16(in, 6);
+    if (!compute_dispatch_kind_ok(rec.dispatch_kind))
+        return MX_ERR_STATE;
+    for (i = 0; i < 3; i++)
+        rec.dimensions[i] = mx_r32(in, 8 + i * 4);
+    if (!compute_dimensions_ok(rec.dimensions))
+        return MX_ERR_RANGE;
+    if (mx_r32(in, 20) != 0 || mx_r32(in, 24) != 0 || mx_r32(in, 28) != 0)
+        return MX_ERR_RESERVED;
+    if (len != MXGPU_COMPUTE_SUBMIT_HEADER_SIZE + rec.binding_count * MXGPU_EXECUTION_BINDING_SIZE)
+        return MX_ERR_LENGTH;
+    for (i = 0; i < rec.binding_count; i++) {
+        int status = mxgpu_binding_decode(in + MXGPU_COMPUTE_SUBMIT_HEADER_SIZE +
+                                              i * MXGPU_EXECUTION_BINDING_SIZE,
+                                          MXGPU_EXECUTION_BINDING_SIZE, &bindings[i]);
+        if (status != MX_OK)
+            return status;
+    }
+    if (!bindings_unique(bindings, rec.binding_count))
+        return MX_ERR_BINDING;
     *out = rec;
     return MX_OK;
 }

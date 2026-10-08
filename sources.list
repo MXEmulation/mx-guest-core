@@ -26,3 +26,4 @@ tests/test_vertex.c
 tests/test_stage_interface.c
 tests/test_creation_decode.c
 tests/test_mxga_clipboard.c
+tests/test_compute.c

@@ -25,6 +25,30 @@
 #define MXSB_OP_SELECT 12u
 #define MXSB_OP_EXTRACT 14u
 #define MXSB_OP_BUFFER_LOAD 15u
+#define MXSB_OP_BUFFER_STORE 16u
+#define MXSB_OP_TEXTURE_STORE 18u
+#define MXSB_OP_WORKGROUP_MEMORY 73u
+#define MXSB_OP_WORKGROUP_LOAD 74u
+#define MXSB_OP_WORKGROUP_STORE 75u
+#define MXSB_OP_CONTROL_BARRIER 76u
+#define MXSB_OP_MEMORY_BARRIER 77u
+#define MXSB_OP_WORKGROUP_ATOMIC_LOAD 78u
+#define MXSB_OP_WORKGROUP_ATOMIC_STORE 79u
+#define MXSB_OP_WORKGROUP_ATOMIC_EXCHANGE 80u
+#define MXSB_OP_WORKGROUP_ATOMIC_COMPARE_EXCHANGE 81u
+#define MXSB_OP_WORKGROUP_ATOMIC_ADD 82u
+#define MXSB_OP_BUFFER_ATOMIC_LOAD 104u
+#define MXSB_OP_BUFFER_ATOMIC_STORE 105u
+#define MXSB_OP_BUFFER_ATOMIC_EXCHANGE 106u
+#define MXSB_OP_BUFFER_ATOMIC_COMPARE_EXCHANGE 107u
+#define MXSB_OP_BUFFER_ATOMIC_ADD 108u
+#define MXSB_OP_BUFFER_ATOMIC_SUBTRACT 109u
+#define MXSB_OP_BUFFER_ATOMIC_MINIMUM 110u
+#define MXSB_OP_BUFFER_ATOMIC_MAXIMUM 111u
+#define MXSB_OP_BUFFER_ATOMIC_AND 112u
+#define MXSB_OP_BUFFER_ATOMIC_OR 113u
+#define MXSB_OP_BUFFER_ATOMIC_XOR 114u
+#define MXSB_OP_DEVICE_MEMORY_BARRIER 115u
 #define MXSB_OP_CONSTRUCT 13u
 #define MXSB_OP_FABS 36u
 #define MXSB_OP_FLOOR 37u
@@ -79,14 +103,31 @@
 #define MXSB_TYPE_F32X2 11u
 #define MXSB_TYPE_F32X3 12u
 #define MXSB_TYPE_F32X4 13u
+#define MXSB_STAGE_COMPUTE 1u
 #define MXSB_STAGE_VERTEX 2u
 #define MXSB_STAGE_FRAGMENT 3u
 #define MXSB_BINDING_UNIFORM 1u
+#define MXSB_BINDING_STORAGE 2u
 #define MXSB_BINDING_TEXTURE_2D 3u
 #define MXSB_BINDING_SAMPLER 4u
 #define MXSB_BINDING_TEXTURE_CUBE 8u
 #define MXSB_ACCESS_READ 1u
+#define MXSB_ACCESS_WRITE 2u
+#define MXSB_ACCESS_READ_WRITE 3u
+#define MXSB_BUILTIN_GLOBAL_INVOCATION_ID 1u
+#define MXSB_BUILTIN_LOCAL_INVOCATION_ID 2u
+#define MXSB_BUILTIN_WORKGROUP_ID 3u
 #define MXSB_BUILTIN_VERTEX_ID 4u
+#define MXSB_BUILTIN_INSTANCE_ID 5u
+#define MXSB_BUILTIN_BASE_VERTEX 12u
+#define MXSB_BUILTIN_BASE_INSTANCE 13u
+#define MXSB_BUILTIN_VIEW_INDEX 16u
+#define MXSB_BUILTIN_LOCAL_INVOCATION_INDEX 20u
+#define MXSB_BUILTIN_WORKGROUP_SIZE 21u
+#define MXSB_BUILTIN_DISPATCH_WORKGROUP_SIZE 22u
+#define MXSB_BUILTIN_NUM_WORKGROUPS 23u
+#define MXSB_BUILTIN_GLOBAL_SIZE 24u
+#define MXSB_CUBE_TEXEL_ACCESS_MINIMUM_MINOR 66u
 #define MXSB_INTERP_PERSPECTIVE 1u
 #define MXSB_INTERP_NO_PERSPECTIVE 2u
 #define MXSB_INTERP_FLAT 3u
@@ -137,6 +178,9 @@ int mxsb_writer_init(struct mxsb_writer *writer, uint32_t *words, uint32_t capac
 int mxsb_writer_binding(struct mxsb_writer *writer, uint32_t id, uint16_t slot, uint32_t kind,
                         uint32_t access, uint32_t value_type, uint32_t element_count);
 int mxsb_writer_entry(struct mxsb_writer *writer, uint32_t id, uint32_t stage, uint32_t root);
+/* Workgroup extents are nonzero for a compute entry and zero for every other stage. */
+int mxsb_writer_entry_workgroup(struct mxsb_writer *writer, uint32_t id, uint32_t stage,
+                                uint32_t root, uint32_t width, uint32_t height, uint32_t depth);
 int mxsb_writer_block(struct mxsb_writer *writer, uint32_t id, uint32_t entry,
                       const uint32_t *const *records, const uint32_t *record_words,
                       uint32_t record_count);

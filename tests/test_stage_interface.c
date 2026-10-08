@@ -46,7 +46,7 @@ int main(void)
     assert(mxsb_opcode_minimum_minor(MXSB_OP_STAGE_INPUT,&minor) == MXSB_OK && minor == 1);
     assert(mxsb_opcode_minimum_minor(MXSB_OP_STAGE_OUTPUT,&minor) == MXSB_OK && minor == 1);
     minor=123; assert(mxsb_opcode_minimum_minor(0xffffu,&minor) == MXSB_ERR_OPCODE && minor == 123);
-    assert(mxsb_opcode_minimum_minor(16u,&minor) == MXSB_ERR_OPCODE && minor == 123);
+    assert(mxsb_opcode_minimum_minor(MXSB_OP_BUFFER_STORE,&minor) == MXSB_OK && minor == 0);
     assert(module(MXSB_OP_VERTEX_ATTRIBUTE,MXSB_TYPE_F32X4,0,0,MXSB_STAGE_VERTEX,5,0,1) == MXSB_OK);
     assert(module(MXSB_OP_VERTEX_ATTRIBUTE,MXSB_TYPE_F32X4,0,0,MXSB_STAGE_VERTEX,4,0,1) == MXSB_ERR_OPCODE);
     assert(module(MXSB_OP_VERTEX_ATTRIBUTE,MXSB_TYPE_BOOL,0,0,MXSB_STAGE_VERTEX,5,0,1) == MXSB_ERR_TYPE);

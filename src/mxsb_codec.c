@@ -40,6 +40,10 @@ static uint32_t opcode_minor(uint16_t opcode)
         return 6;
     if (opcode >= 50 && opcode <= 62)
         return 9;
+    if (opcode >= MXSB_OP_WORKGROUP_MEMORY && opcode <= MXSB_OP_WORKGROUP_ATOMIC_ADD)
+        return 16;
+    if (opcode >= MXSB_OP_BUFFER_ATOMIC_LOAD && opcode <= MXSB_OP_DEVICE_MEMORY_BARRIER)
+        return 20;
     if (opcode == MXSB_OP_TEXTURE_SAMPLE_BOUND_OPERANDS)
         return 67;
     if (opcode >= MXSB_OP_TEXTURE_SAMPLE_LOD && opcode <= MXSB_OP_TEXTURE_SAMPLE_BOUND_GRAD)
@@ -114,7 +118,36 @@ static int record_words_ok(uint16_t opcode, uint32_t words)
     case MXSB_OP_EXTRACT:
     case MXSB_OP_BUFFER_LOAD:
     case MXSB_OP_STAGE_INPUT:
+    case MXSB_OP_WORKGROUP_LOAD:
+    case MXSB_OP_WORKGROUP_STORE:
+    case MXSB_OP_WORKGROUP_ATOMIC_LOAD:
+    case MXSB_OP_WORKGROUP_ATOMIC_STORE:
+    case MXSB_OP_BUFFER_ATOMIC_LOAD:
+    case MXSB_OP_BUFFER_ATOMIC_STORE:
         return words == 5;
+    case MXSB_OP_BUFFER_STORE:
+    case MXSB_OP_TEXTURE_STORE:
+        return words == 4;
+    case MXSB_OP_WORKGROUP_ATOMIC_EXCHANGE:
+    case MXSB_OP_WORKGROUP_ATOMIC_ADD:
+    case MXSB_OP_BUFFER_ATOMIC_EXCHANGE:
+    case MXSB_OP_BUFFER_ATOMIC_ADD:
+    case MXSB_OP_BUFFER_ATOMIC_SUBTRACT:
+    case MXSB_OP_BUFFER_ATOMIC_MINIMUM:
+    case MXSB_OP_BUFFER_ATOMIC_MAXIMUM:
+    case MXSB_OP_BUFFER_ATOMIC_AND:
+    case MXSB_OP_BUFFER_ATOMIC_OR:
+    case MXSB_OP_BUFFER_ATOMIC_XOR:
+        return words == 6;
+    case MXSB_OP_WORKGROUP_ATOMIC_COMPARE_EXCHANGE:
+    case MXSB_OP_BUFFER_ATOMIC_COMPARE_EXCHANGE:
+        return words == 7;
+    case MXSB_OP_WORKGROUP_MEMORY:
+        return words == 2;
+    case MXSB_OP_CONTROL_BARRIER:
+    case MXSB_OP_MEMORY_BARRIER:
+    case MXSB_OP_DEVICE_MEMORY_BARRIER:
+        return words == 1;
     case MXSB_OP_CONSTRUCT:
         return words >= 4;
     case MXSB_OP_STAGE_OUTPUT:
@@ -142,7 +175,21 @@ static int record_words_ok(uint16_t opcode, uint32_t words)
 
 static int opcode_has_result(uint16_t opcode)
 {
-    return opcode < 0x100u && opcode != MXSB_OP_STAGE_OUTPUT;
+    switch (opcode) {
+    case MXSB_OP_STAGE_OUTPUT:
+    case MXSB_OP_BUFFER_STORE:
+    case MXSB_OP_TEXTURE_STORE:
+    case MXSB_OP_WORKGROUP_MEMORY:
+    case MXSB_OP_WORKGROUP_STORE:
+    case MXSB_OP_CONTROL_BARRIER:
+    case MXSB_OP_MEMORY_BARRIER:
+    case MXSB_OP_WORKGROUP_ATOMIC_STORE:
+    case MXSB_OP_BUFFER_ATOMIC_STORE:
+    case MXSB_OP_DEVICE_MEMORY_BARRIER:
+        return 0;
+    default:
+        return opcode < 0x100u;
+    }
 }
 
 static int interface_type(uint32_t type)
@@ -244,6 +291,280 @@ static int return_precedes(const uint8_t *bytes, uint32_t first_block, uint32_t 
     return 0;
 }
 
+struct vctx {
+    const uint8_t *bytes;
+    uint32_t words;
+    uint32_t bindings;
+    uint32_t blocks;
+    uint32_t blocks_base;
+    uint32_t block_base;
+    uint32_t cursor;
+    uint32_t entry;
+    uint32_t root;
+    uint32_t stage;
+    uint16_t minor;
+};
+
+struct builtin_info {
+    uint32_t id;
+    uint32_t stage;
+    uint32_t type;
+    uint32_t minor;
+};
+
+/* A zero stage admits every stage that takes part in a draw. */
+static const struct builtin_info builtins[] = {
+    {MXSB_BUILTIN_GLOBAL_INVOCATION_ID, MXSB_STAGE_COMPUTE, MXSB_TYPE_U32X3, 0},
+    {MXSB_BUILTIN_LOCAL_INVOCATION_ID, MXSB_STAGE_COMPUTE, MXSB_TYPE_U32X3, 0},
+    {MXSB_BUILTIN_WORKGROUP_ID, MXSB_STAGE_COMPUTE, MXSB_TYPE_U32X3, 0},
+    {MXSB_BUILTIN_VERTEX_ID, MXSB_STAGE_VERTEX, MXSB_TYPE_U32, 0},
+    {MXSB_BUILTIN_INSTANCE_ID, MXSB_STAGE_VERTEX, MXSB_TYPE_U32, 0},
+    {MXSB_BUILTIN_BASE_VERTEX, MXSB_STAGE_VERTEX, MXSB_TYPE_U32, 7},
+    {MXSB_BUILTIN_BASE_INSTANCE, MXSB_STAGE_VERTEX, MXSB_TYPE_U32, 7},
+    {MXSB_BUILTIN_VIEW_INDEX, 0, MXSB_TYPE_U32, 38},
+    {MXSB_BUILTIN_LOCAL_INVOCATION_INDEX, MXSB_STAGE_COMPUTE, MXSB_TYPE_U32, 51},
+    {MXSB_BUILTIN_WORKGROUP_SIZE, MXSB_STAGE_COMPUTE, MXSB_TYPE_U32X3, 52},
+    {MXSB_BUILTIN_DISPATCH_WORKGROUP_SIZE, MXSB_STAGE_COMPUTE, MXSB_TYPE_U32X3, 52},
+    {MXSB_BUILTIN_NUM_WORKGROUPS, MXSB_STAGE_COMPUTE, MXSB_TYPE_U32X3, 52},
+    {MXSB_BUILTIN_GLOBAL_SIZE, MXSB_STAGE_COMPUTE, MXSB_TYPE_U32X3, 52},
+};
+
+static uint32_t ctx_word(const struct vctx *c, uint32_t index)
+{
+    return mx_r32(c->bytes, (c->cursor + index) * 4u);
+}
+
+static int find_binding(const struct vctx *c, uint32_t id, uint32_t *index)
+{
+    uint32_t w;
+    for (w = 0; w < c->bindings; w++) {
+        if (binding_word(c->bytes, w, 0) == id) {
+            *index = w;
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static uint32_t binding_kind(const struct vctx *c, uint32_t index)
+{
+    return (binding_word(c->bytes, index, 1) >> 16) & 15u;
+}
+
+static uint32_t binding_access(const struct vctx *c, uint32_t index)
+{
+    return (binding_word(c->bytes, index, 1) >> 20) & 15u;
+}
+
+static int operand_check(const struct vctx *c, uint32_t value, uint32_t expected)
+{
+    uint32_t prior = c->block_base + 4u;
+    int found = 0;
+    while (prior < c->cursor) {
+        uint32_t head = mx_r32(c->bytes, prior * 4u);
+        if (opcode_has_result((uint16_t)head) && mx_r32(c->bytes, (prior + 1u) * 4u) == value) {
+            if (mx_r32(c->bytes, (prior + 2u) * 4u) != expected)
+                return MXSB_ERR_TYPE;
+            found = 1;
+        }
+        prior += head >> 16;
+    }
+    return found ? MXSB_OK : MXSB_ERR_VALUE;
+}
+
+static uint32_t type_bytes(uint32_t type)
+{
+    return 4u * (type <= MXSB_TYPE_F32 ? 1u : (type - MXSB_TYPE_I32X2) % 3u + 2u);
+}
+
+/* Byte size of the entry's workgroup memory declaration, or zero when it declares none. */
+static uint32_t entry_workgroup_bytes(const struct vctx *c)
+{
+    uint32_t block = c->blocks_base;
+    uint32_t i;
+    for (i = 0; i < c->blocks; i++) {
+        uint32_t size;
+        uint32_t head;
+        if (c->words - block < 4u)
+            return 0;
+        size = mx_r32(c->bytes, (block + 2u) * 4u);
+        if (size < 4u || size > c->words - block)
+            return 0;
+        head = size >= 6u ? mx_r32(c->bytes, (block + 4u) * 4u) : 0;
+        if (mx_r32(c->bytes, (block + 1u) * 4u) == c->entry &&
+            mx_r32(c->bytes, block * 4u) == c->root && (uint16_t)head == MXSB_OP_WORKGROUP_MEMORY &&
+            (head >> 16) == 2u)
+            return mx_r32(c->bytes, (block + 5u) * 4u);
+        block += size;
+    }
+    return 0;
+}
+
+static int builtin_record(const struct vctx *c)
+{
+    uint32_t type = ctx_word(c, 2);
+    uint32_t id = ctx_word(c, 3);
+    size_t i;
+    for (i = 0; i < sizeof builtins / sizeof builtins[0]; i++) {
+        if (builtins[i].id != id)
+            continue;
+        if (builtins[i].stage ? builtins[i].stage != c->stage : c->stage == MXSB_STAGE_COMPUTE)
+            return MXSB_ERR_STAGE;
+        if (c->minor < builtins[i].minor)
+            return MXSB_ERR_VERSION;
+        return type == builtins[i].type ? MXSB_OK : MXSB_ERR_TYPE;
+    }
+    return c->stage == MXSB_STAGE_FRAGMENT ? MXSB_ERR_STAGE : MXSB_ERR_VALUE;
+}
+
+static int buffer_store_record(const struct vctx *c)
+{
+    uint32_t w;
+    int status;
+    if (!find_binding(c, ctx_word(c, 1), &w) || binding_kind(c, w) != MXSB_BINDING_STORAGE ||
+        !(binding_access(c, w) & MXSB_ACCESS_WRITE))
+        return MXSB_ERR_BINDING;
+    status = operand_check(c, ctx_word(c, 2), MXSB_TYPE_U32);
+    if (status != MXSB_OK)
+        return status;
+    return operand_check(c, ctx_word(c, 3), binding_word(c->bytes, w, 2));
+}
+
+static int texture_store_record(const struct vctx *c)
+{
+    uint32_t w;
+    uint32_t kind;
+    int status;
+    if (!find_binding(c, ctx_word(c, 1), &w))
+        return MXSB_ERR_BINDING;
+    kind = binding_kind(c, w);
+    if (kind != MXSB_BINDING_TEXTURE_2D && kind != MXSB_BINDING_TEXTURE_CUBE)
+        return MXSB_ERR_BINDING;
+    if (kind == MXSB_BINDING_TEXTURE_CUBE && c->minor < MXSB_CUBE_TEXEL_ACCESS_MINIMUM_MINOR)
+        return MXSB_ERR_VERSION;
+    if (!(binding_access(c, w) & MXSB_ACCESS_WRITE))
+        return MXSB_ERR_BINDING;
+    status = operand_check(c, ctx_word(c, 2),
+                           kind == MXSB_BINDING_TEXTURE_CUBE ? MXSB_TYPE_U32X3 : MXSB_TYPE_U32X2);
+    if (status != MXSB_OK)
+        return status;
+    return operand_check(c, ctx_word(c, 3), binding_word(c->bytes, w, 2));
+}
+
+static int buffer_atomic_record(const struct vctx *c, uint16_t opcode)
+{
+    int load = opcode == MXSB_OP_BUFFER_ATOMIC_LOAD;
+    int store = opcode == MXSB_OP_BUFFER_ATOMIC_STORE;
+    uint32_t first = store ? 1u : 2u;
+    uint32_t type = ctx_word(c, first);
+    uint32_t w;
+    int status;
+    if (!find_binding(c, ctx_word(c, first + 1u), &w) ||
+        binding_kind(c, w) != MXSB_BINDING_STORAGE || !(binding_access(c, w) & MXSB_ACCESS_READ) ||
+        (!load && !(binding_access(c, w) & MXSB_ACCESS_WRITE)))
+        return MXSB_ERR_BINDING;
+    if (type != binding_word(c->bytes, w, 2) || (type != MXSB_TYPE_I32 && type != MXSB_TYPE_U32))
+        return MXSB_ERR_TYPE;
+    status = operand_check(c, ctx_word(c, first + 2u), MXSB_TYPE_U32);
+    if (status != MXSB_OK)
+        return status;
+    if (opcode == MXSB_OP_BUFFER_ATOMIC_COMPARE_EXCHANGE) {
+        status = operand_check(c, ctx_word(c, 5), type);
+        if (status != MXSB_OK)
+            return status;
+        return operand_check(c, ctx_word(c, 6), type);
+    }
+    if (load)
+        return MXSB_OK;
+    return operand_check(c, ctx_word(c, store ? 4u : 5u), type);
+}
+
+static int workgroup_record(const struct vctx *c, uint16_t opcode)
+{
+    int stored = opcode == MXSB_OP_WORKGROUP_STORE || opcode == MXSB_OP_WORKGROUP_ATOMIC_STORE;
+    int atomic = opcode >= MXSB_OP_WORKGROUP_ATOMIC_LOAD;
+    uint32_t type = ctx_word(c, stored ? 1u : 2u);
+    uint32_t offset = ctx_word(c, stored ? 2u : 3u);
+    uint32_t declared;
+    uint32_t size;
+    int status;
+    if (c->stage != MXSB_STAGE_COMPUTE)
+        return MXSB_ERR_STAGE;
+    declared = entry_workgroup_bytes(c);
+    if (declared == 0)
+        return MXSB_ERR_STRUCTURE;
+    if (atomic ? (type != MXSB_TYPE_I32 && type != MXSB_TYPE_U32) : !interface_type(type))
+        return MXSB_ERR_TYPE;
+    size = type_bytes(type);
+    if (offset % size != 0 || offset > declared || size > declared - offset)
+        return MXSB_ERR_VALUE;
+    status = operand_check(c, ctx_word(c, stored ? 3u : 4u), MXSB_TYPE_U32);
+    if (status != MXSB_OK)
+        return status;
+    switch (opcode) {
+    case MXSB_OP_WORKGROUP_STORE:
+    case MXSB_OP_WORKGROUP_ATOMIC_STORE:
+        return operand_check(c, ctx_word(c, 4), type);
+    case MXSB_OP_WORKGROUP_ATOMIC_EXCHANGE:
+    case MXSB_OP_WORKGROUP_ATOMIC_ADD:
+        return operand_check(c, ctx_word(c, 5), type);
+    case MXSB_OP_WORKGROUP_ATOMIC_COMPARE_EXCHANGE:
+        status = operand_check(c, ctx_word(c, 5), type);
+        if (status != MXSB_OK)
+            return status;
+        return operand_check(c, ctx_word(c, 6), type);
+    default:
+        return MXSB_OK;
+    }
+}
+
+/* Checks for the builtin, storage, barrier, workgroup memory and atomic records. */
+static int extended_record(const struct vctx *c, uint16_t opcode)
+{
+    switch (opcode) {
+    case MXSB_OP_BUILTIN:
+        return builtin_record(c);
+    case MXSB_OP_BUFFER_STORE:
+        return buffer_store_record(c);
+    case MXSB_OP_TEXTURE_STORE:
+        return texture_store_record(c);
+    case MXSB_OP_WORKGROUP_MEMORY:
+        if (c->stage != MXSB_STAGE_COMPUTE)
+            return MXSB_ERR_STAGE;
+        if (mx_r32(c->bytes, c->block_base * 4u) != c->root || c->cursor != c->block_base + 4u)
+            return MXSB_ERR_STRUCTURE;
+        return ctx_word(c, 1) == 0 || (ctx_word(c, 1) & 3u) ? MXSB_ERR_VALUE : MXSB_OK;
+    case MXSB_OP_CONTROL_BARRIER:
+        if (c->stage != MXSB_STAGE_COMPUTE)
+            return MXSB_ERR_STAGE;
+        return mx_r32(c->bytes, c->block_base * 4u) == c->root ? MXSB_OK : MXSB_ERR_STRUCTURE;
+    case MXSB_OP_MEMORY_BARRIER:
+        return c->stage == MXSB_STAGE_COMPUTE ? MXSB_OK : MXSB_ERR_STAGE;
+    case MXSB_OP_WORKGROUP_LOAD:
+    case MXSB_OP_WORKGROUP_STORE:
+    case MXSB_OP_WORKGROUP_ATOMIC_LOAD:
+    case MXSB_OP_WORKGROUP_ATOMIC_STORE:
+    case MXSB_OP_WORKGROUP_ATOMIC_EXCHANGE:
+    case MXSB_OP_WORKGROUP_ATOMIC_COMPARE_EXCHANGE:
+    case MXSB_OP_WORKGROUP_ATOMIC_ADD:
+        return workgroup_record(c, opcode);
+    case MXSB_OP_BUFFER_ATOMIC_LOAD:
+    case MXSB_OP_BUFFER_ATOMIC_STORE:
+    case MXSB_OP_BUFFER_ATOMIC_EXCHANGE:
+    case MXSB_OP_BUFFER_ATOMIC_COMPARE_EXCHANGE:
+    case MXSB_OP_BUFFER_ATOMIC_ADD:
+    case MXSB_OP_BUFFER_ATOMIC_SUBTRACT:
+    case MXSB_OP_BUFFER_ATOMIC_MINIMUM:
+    case MXSB_OP_BUFFER_ATOMIC_MAXIMUM:
+    case MXSB_OP_BUFFER_ATOMIC_AND:
+    case MXSB_OP_BUFFER_ATOMIC_OR:
+    case MXSB_OP_BUFFER_ATOMIC_XOR:
+        return buffer_atomic_record(c, opcode);
+    default:
+        return MXSB_OK;
+    }
+}
+
 int mxsb_verify(const uint8_t *bytes, uint32_t len, const struct mxsb_limits *limits)
 {
     uint32_t words;
@@ -258,6 +579,8 @@ int mxsb_verify(const uint8_t *bytes, uint32_t len, const struct mxsb_limits *li
     uint32_t entry_base;
     uint32_t blocks_base;
     uint32_t instruction_total = 0;
+    struct vctx vc;
+    memset(&vc, 0, sizeof vc);
     if (limits_ok(limits) != MXSB_OK)
         return MXSB_ERR_LIMIT;
     if (!bytes || (len & 3u))
@@ -307,10 +630,19 @@ int mxsb_verify(const uint8_t *bytes, uint32_t len, const struct mxsb_limits *li
                 return MXSB_ERR_BINDING;
         if (attr != 0 || (packed >> 24) != 0)
             return MXSB_ERR_RESERVED;
-        if (kind != MXSB_BINDING_UNIFORM && kind != MXSB_BINDING_TEXTURE_2D &&
-            kind != MXSB_BINDING_TEXTURE_CUBE && kind != MXSB_BINDING_SAMPLER)
+        if (kind != MXSB_BINDING_UNIFORM && kind != MXSB_BINDING_STORAGE &&
+            kind != MXSB_BINDING_TEXTURE_2D && kind != MXSB_BINDING_TEXTURE_CUBE &&
+            kind != MXSB_BINDING_SAMPLER)
             return MXSB_ERR_BINDING;
-        if (access != MXSB_ACCESS_READ)
+        if (access < MXSB_ACCESS_READ || access > MXSB_ACCESS_READ_WRITE)
+            return MXSB_ERR_BINDING;
+        if ((kind == MXSB_BINDING_UNIFORM || kind == MXSB_BINDING_SAMPLER) &&
+            access != MXSB_ACCESS_READ)
+            return MXSB_ERR_BINDING;
+        if (kind == MXSB_BINDING_TEXTURE_CUBE && access != MXSB_ACCESS_READ &&
+            minor < MXSB_CUBE_TEXEL_ACCESS_MINIMUM_MINOR)
+            return MXSB_ERR_BINDING;
+        if (kind == MXSB_BINDING_STORAGE && (elements == 0 || !interface_type(value_type)))
             return MXSB_ERR_BINDING;
         if (kind == MXSB_BINDING_SAMPLER &&
             (minor < 5 || elements < 1 || elements > 9 || (elements > 1 && minor < 26) ||
@@ -333,10 +665,17 @@ int mxsb_verify(const uint8_t *bytes, uint32_t len, const struct mxsb_limits *li
         uint32_t tail = mx_r32(bytes, base + 24);
         if (tail != 0)
             return MXSB_ERR_RESERVED;
-        if (stage != MXSB_STAGE_VERTEX && stage != MXSB_STAGE_FRAGMENT)
+        if (stage != MXSB_STAGE_COMPUTE && stage != MXSB_STAGE_VERTEX &&
+            stage != MXSB_STAGE_FRAGMENT)
             return MXSB_ERR_STAGE;
-        if (wg0 || wg1 || wg2)
+        if (stage == MXSB_STAGE_COMPUTE) {
+            uint64_t plane = (uint64_t)wg0 * wg1;
+            if (wg0 == 0 || wg1 == 0 || wg2 == 0 || plane > UINT32_MAX ||
+                plane * wg2 > UINT32_MAX)
+                return MXSB_ERR_STRUCTURE;
+        } else if (wg0 || wg1 || wg2) {
             return MXSB_ERR_STRUCTURE;
+        }
         if (mx_r32(bytes, base) == 0)
             return MXSB_ERR_STRUCTURE;
         {
@@ -376,6 +715,16 @@ int mxsb_verify(const uint8_t *bytes, uint32_t len, const struct mxsb_limits *li
         if (!found)
             return MXSB_ERR_STRUCTURE;
         cursor = block_base + 4;
+        vc.bytes = bytes;
+        vc.words = words;
+        vc.bindings = bindings;
+        vc.blocks = blocks;
+        vc.blocks_base = blocks_base;
+        vc.block_base = block_base;
+        vc.entry = entry;
+        vc.root = root;
+        vc.stage = stage;
+        vc.minor = minor;
         if (record_count == 0)
             return MXSB_ERR_STRUCTURE;
         if (record_count > limits->max_instructions - instruction_total)
@@ -413,8 +762,12 @@ int mxsb_verify(const uint8_t *bytes, uint32_t len, const struct mxsb_limits *li
                 return MXSB_ERR_STAGE;
             if (opcode == MXSB_OP_STAGE_INPUT && stage != MXSB_STAGE_FRAGMENT)
                 return MXSB_ERR_STAGE;
-            if (opcode == MXSB_OP_BUILTIN && stage != MXSB_STAGE_VERTEX)
-                return MXSB_ERR_STAGE;
+            vc.cursor = cursor;
+            {
+                int extended_status = extended_record(&vc, opcode);
+                if (extended_status != MXSB_OK)
+                    return extended_status;
+            }
             if (opcode == MXSB_OP_STAGE_INPUT || opcode == MXSB_OP_STAGE_OUTPUT ||
                 opcode == MXSB_OP_VERTEX_ATTRIBUTE) {
                 int interface_status=interface_record(bytes,block_base,cursor,opcode,stage,root,minor);
@@ -433,8 +786,7 @@ int mxsb_verify(const uint8_t *bytes, uint32_t len, const struct mxsb_limits *li
                 while (prior < cursor) {
                     uint32_t prior_head = mx_r32(bytes, prior * 4u);
                     uint32_t prior_count = prior_head >> 16;
-                    uint32_t prior_opcode = prior_head & 0xffffu;
-                    if (prior_count >= 4 && prior_opcode != MXSB_OP_STAGE_OUTPUT &&
+                    if (opcode_has_result((uint16_t)prior_head) &&
                         mx_r32(bytes, (prior + 1) * 4u) == value) {
                         if (mx_r32(bytes, (prior + 2) * 4u) != type)
                             return MXSB_ERR_TYPE;
@@ -461,7 +813,8 @@ int mxsb_verify(const uint8_t *bytes, uint32_t len, const struct mxsb_limits *li
                     if (binding_word(bytes, w, 0) == binding) {
                         matched = 1;
                         if (opcode == MXSB_OP_BUFFER_LOAD &&
-                            ((binding_word(bytes, w, 1) >> 16) & 15u) != MXSB_BINDING_UNIFORM)
+                            ((binding_word(bytes, w, 1) >> 16) & 15u) != MXSB_BINDING_UNIFORM &&
+                            ((binding_word(bytes, w, 1) >> 16) & 15u) != MXSB_BINDING_STORAGE)
                             return MXSB_ERR_BINDING;
                         if ((opcode == MXSB_OP_TEXTURE_SAMPLE_BOUND_OPERANDS ||
                              opcode == MXSB_OP_TEXTURE_SAMPLE ||
@@ -471,10 +824,19 @@ int mxsb_verify(const uint8_t *bytes, uint32_t len, const struct mxsb_limits *li
                             ((binding_word(bytes, w, 1) >> 16) & 15u) != MXSB_BINDING_TEXTURE_2D &&
                             ((binding_word(bytes, w, 1) >> 16) & 15u) != MXSB_BINDING_TEXTURE_CUBE)
                             return MXSB_ERR_BINDING;
-                        if (((binding_word(bytes, w, 1) >> 20) & 15u) != MXSB_ACCESS_READ)
+                        if (opcode == MXSB_OP_BUFFER_LOAD
+                                ? !(binding_access(&vc, w) & MXSB_ACCESS_READ)
+                                : binding_access(&vc, w) != MXSB_ACCESS_READ)
                             return MXSB_ERR_BINDING;
                         if (mx_r32(bytes, (cursor + 2) * 4u) != binding_word(bytes, w, 2))
                             return MXSB_ERR_TYPE;
+                        if (opcode == MXSB_OP_BUFFER_LOAD &&
+                            binding_kind(&vc, w) == MXSB_BINDING_STORAGE) {
+                            int index_status =
+                                operand_check(&vc, mx_r32(bytes, (cursor + 4) * 4u), MXSB_TYPE_U32);
+                            if (index_status != MXSB_OK)
+                                return index_status;
+                        }
                     }
                 }
                 if (!matched)
@@ -573,7 +935,7 @@ int mxsb_verify(const uint8_t *bytes, uint32_t len, const struct mxsb_limits *li
                     while (prior < cursor) {
                         uint32_t prior_head = mx_r32(bytes, prior * 4u),
                                  prior_count = prior_head >> 16;
-                        if (prior_count >= 4 && (prior_head & 0xffffu) != MXSB_OP_STAGE_OUTPUT &&
+                        if (opcode_has_result((uint16_t)prior_head) &&
                             mx_r32(bytes, (prior + 1) * 4u) == value) {
                             if (mx_r32(bytes, (prior + 2) * 4u) != expected)
                                 return MXSB_ERR_TYPE;
@@ -591,6 +953,8 @@ int mxsb_verify(const uint8_t *bytes, uint32_t len, const struct mxsb_limits *li
                 uint32_t matched = 0;
                 if (r + 1u != record_count)
                     return MXSB_ERR_STRUCTURE;
+                if (stage == MXSB_STAGE_COMPUTE)
+                    return MXSB_ERR_TYPE;
                 if (return_precedes(bytes, blocks_base, block_base, entry, MXSB_OP_RETURN_VOID))
                     return MXSB_ERR_TYPE;
                 while (prior < cursor) {
@@ -608,9 +972,10 @@ int mxsb_verify(const uint8_t *bytes, uint32_t len, const struct mxsb_limits *li
             } else if (opcode == MXSB_OP_RETURN_VOID || opcode == MXSB_OP_DISCARD) {
                 if (r + 1u != record_count)
                     return MXSB_ERR_STRUCTURE;
-                if (stage != MXSB_STAGE_FRAGMENT)
+                if (stage != MXSB_STAGE_FRAGMENT &&
+                    (opcode == MXSB_OP_DISCARD || stage != MXSB_STAGE_COMPUTE))
                     return MXSB_ERR_STAGE;
-                if (opcode == MXSB_OP_RETURN_VOID) {
+                if (opcode == MXSB_OP_RETURN_VOID && stage == MXSB_STAGE_FRAGMENT) {
                     if (minor < 27u)
                         return MXSB_ERR_VERSION;
                     if (return_precedes(bytes, blocks_base, block_base, entry,
@@ -699,15 +1064,21 @@ int mxsb_writer_binding(struct mxsb_writer *writer, uint32_t id, uint16_t slot, 
 
 int mxsb_writer_entry(struct mxsb_writer *writer, uint32_t id, uint32_t stage, uint32_t root)
 {
+    return mxsb_writer_entry_workgroup(writer, id, stage, root, 0, 0, 0);
+}
+
+int mxsb_writer_entry_workgroup(struct mxsb_writer *writer, uint32_t id, uint32_t stage,
+                                uint32_t root, uint32_t width, uint32_t height, uint32_t depth)
+{
     uint32_t rec[7];
     if (!writer_valid(writer) || writer->block_count || id == 0)
         return MXSB_ERR_STRUCTURE;
     rec[0] = id;
     rec[1] = stage;
     rec[2] = root;
-    rec[3] = 0;
-    rec[4] = 0;
-    rec[5] = 0;
+    rec[3] = width;
+    rec[4] = height;
+    rec[5] = depth;
     rec[6] = 0;
     if (push_words(writer, rec, 7) != MXSB_OK)
         return MXSB_ERR_LIMIT;

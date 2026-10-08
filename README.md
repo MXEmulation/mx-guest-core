@@ -5,8 +5,8 @@ Freestanding C11 encoders, decoders and validators for the MXGPU command protoco
 
 ## Protocol surface
 
-- MXGPU negotiation, transport constants, command and completion records, resources, transfers, rendering, presentation and cursor updates.
-- MXSB module record writers and validation for the supported vertex and fragment instruction subset.
+- MXGPU negotiation, transport constants, command and completion records, resources, transfers, rendering, compute dispatch, presentation and cursor updates.
+- MXSB module record writers and validation for the supported vertex, fragment and compute instruction subset.
 - MXGA frames, system statistics, integration inventories and window actions.
 - MXIO PCI capabilities and direct-descriptor split-ring records.
 
