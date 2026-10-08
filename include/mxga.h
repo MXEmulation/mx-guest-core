@@ -16,15 +16,19 @@
 
 #define MXGA_OP_HELLO 1u
 #define MXGA_OP_HEARTBEAT 2u
+#define MXGA_OP_CLIPBOARD_CHANGED 3u
 #define MXGA_OP_COMMAND_RESULT 4u
 #define MXGA_OP_SYSTEM_STATS 6u
 #define MXGA_OP_INTEGRATION_STATUS 10u
 #define MXGA_OP_SHUTDOWN 0x100u
 #define MXGA_OP_RESTART 0x101u
+#define MXGA_OP_CLIPBOARD_WRITE 0x102u
 #define MXGA_OP_INTEGRATION_WINDOW_ACTION 0x106u
 
 #define MXGA_CAP_SHUTDOWN (1ull << 0)
 #define MXGA_CAP_RESTART (1ull << 1)
+#define MXGA_CAP_CLIPBOARD_READ (1ull << 2)
+#define MXGA_CAP_CLIPBOARD_WRITE (1ull << 3)
 #define MXGA_CAP_SYSTEM_STATS (1ull << 5)
 #define MXGA_CAP_INTEGRATION (1ull << 8)
 
@@ -79,6 +83,25 @@ struct mxga_frame {
     const uint8_t *payload;
     uint32_t payload_len;
 };
+
+#define MXGA_CLIPBOARD_METADATA_BYTES 16u
+#define MXGA_CLIPBOARD_MAX_TEXT_BYTES (MXGA_MAX_FRAME_BYTES - MXGA_HEADER_BYTES - MXGA_CLIPBOARD_METADATA_BYTES)
+
+struct mxga_clipboard {
+    uint64_t origin;
+    uint64_t generation;
+    const uint8_t *text;
+    uint32_t text_bytes;
+};
+
+/* Text and output may overlap during encoding. out_len, when supplied, must
+ * be disjoint from both ranges. Invalid or overlapping metadata spans are
+ * refused without modifying them. */
+int mxga_encode_clipboard(uint64_t origin, uint64_t generation, const uint8_t *text,
+                          uint32_t text_bytes, uint8_t *out, uint32_t cap, uint32_t *out_len);
+/* The decoded text borrows the immutable payload for its complete lifetime.
+ * The output record must be disjoint from the entire payload. */
+int mxga_decode_clipboard(const uint8_t *payload, uint32_t len, struct mxga_clipboard *out);
 
 struct mxga_cpu_stat {
     uint32_t usage_permille;

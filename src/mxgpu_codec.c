@@ -6,6 +6,17 @@
 
 #include <string.h>
 
+static int codec_span(const void *address, size_t bytes)
+{
+    return address && (uintptr_t)address <= UINTPTR_MAX - bytes;
+}
+
+static int codec_overlap(const void *a, size_t an, const void *b, size_t bn)
+{
+    uintptr_t av = (uintptr_t)a, bv = (uintptr_t)b;
+    return an && bn && (av <= bv ? bv - av < an : av - bv < bn);
+}
+
 static int emit(uint8_t *out, uint32_t cap, uint32_t *out_len, const uint8_t *src, uint32_t n)
 {
     if (out_len)
@@ -835,6 +846,31 @@ int mxgpu_used_decode(const uint8_t *in, uint32_t len, struct mxgpu_used_entry *
     return MX_OK;
 }
 
+static void transfer_write(const struct mxgpu_transfer *in, uint8_t *out)
+{
+    mx_w32(out, 0, in->resource_id);
+    mx_w16(out, 4, in->mip_level); mx_w16(out, 6, in->array_layer);
+    mx_w32(out, 8, in->x); mx_w32(out, 12, in->y); mx_w32(out, 16, in->z);
+    mx_w32(out, 20, in->width); mx_w32(out, 24, in->height); mx_w32(out, 28, in->depth);
+    mx_w64(out, 32, in->resource_offset);
+    mx_w32(out, 40, in->row_bytes); mx_w32(out, 44, in->data_bytes);
+}
+
+int mxgpu_transfer_request_encode(const struct mxgpu_transfer *in, uint8_t *out,
+                                  uint32_t cap, uint32_t *out_len)
+{
+    if (!codec_span(in, sizeof(*in)) || !codec_span(out, cap) ||
+        !codec_span(out_len, sizeof(*out_len)) ||
+        codec_overlap(in, sizeof(*in), out, cap) ||
+        codec_overlap(in, sizeof(*in), out_len, sizeof(*out_len)) ||
+        codec_overlap(out, cap, out_len, sizeof(*out_len))) return MX_ERR_STATE;
+    if (!in->resource_id || !in->data_bytes) return MX_ERR_RANGE;
+    if (cap < MXGPU_TRANSFER_REQUEST_SIZE) return MX_ERR_LENGTH;
+    transfer_write(in, out);
+    *out_len = MXGPU_TRANSFER_REQUEST_SIZE;
+    return MX_OK;
+}
+
 int mxgpu_transfer_encode(const struct mxgpu_transfer *in, const uint8_t *data, uint8_t *out,
                           uint32_t cap, uint32_t *out_len)
 {
@@ -848,33 +884,22 @@ int mxgpu_transfer_encode(const struct mxgpu_transfer *in, const uint8_t *data, 
         *out_len = 0;
     if (!out || cap < total)
         return MX_ERR_LENGTH;
-    memset(out, 0, MXGPU_TRANSFER_REQUEST_SIZE);
-    mx_w32(out, 0, in->resource_id);
-    mx_w16(out, 4, in->mip_level);
-    mx_w16(out, 6, in->array_layer);
-    mx_w32(out, 8, in->x);
-    mx_w32(out, 12, in->y);
-    mx_w32(out, 16, in->z);
-    mx_w32(out, 20, in->width);
-    mx_w32(out, 24, in->height);
-    mx_w32(out, 28, in->depth);
-    mx_w64(out, 32, in->resource_offset);
-    mx_w32(out, 40, in->row_bytes);
-    mx_w32(out, 44, in->data_bytes);
+    transfer_write(in, out);
     memcpy(out + MXGPU_TRANSFER_REQUEST_SIZE, data, in->data_bytes);
     if (out_len)
         *out_len = total;
     return MX_OK;
 }
 
-int mxgpu_transfer_decode(const uint8_t *in, uint32_t len, struct mxgpu_transfer *out,
-                          const uint8_t **data)
+int mxgpu_transfer_request_decode(const uint8_t *in, uint32_t len, struct mxgpu_transfer *out)
 {
     struct mxgpu_transfer rec;
-    if (!in || !out)
+    if (!codec_span(in, len) || !codec_span(out, sizeof(*out)) ||
+        codec_overlap(in, len, out, sizeof(*out)))
         return MX_ERR_STATE;
-    if (len < MXGPU_TRANSFER_REQUEST_SIZE)
+    if (len != MXGPU_TRANSFER_REQUEST_SIZE)
         return MX_ERR_LENGTH;
+    memset(&rec, 0, sizeof(rec));
     rec.resource_id = mx_r32(in, 0);
     rec.mip_level = mx_r16(in, 4);
     rec.array_layer = mx_r16(in, 6);
@@ -889,8 +914,21 @@ int mxgpu_transfer_decode(const uint8_t *in, uint32_t len, struct mxgpu_transfer
     rec.data_bytes = mx_r32(in, 44);
     if (rec.resource_id == 0 || rec.data_bytes == 0)
         return MX_ERR_RANGE;
-    if (len != MXGPU_TRANSFER_REQUEST_SIZE + rec.data_bytes)
-        return MX_ERR_LENGTH;
+    *out = rec;
+    return MX_OK;
+}
+
+int mxgpu_transfer_decode(const uint8_t *in, uint32_t len, struct mxgpu_transfer *out,
+                          const uint8_t **data)
+{
+    struct mxgpu_transfer rec;
+    int result;
+    if (!in || !out) return MX_ERR_STATE;
+    if (len < MXGPU_TRANSFER_REQUEST_SIZE) return MX_ERR_LENGTH;
+    result = mxgpu_transfer_request_decode(in, MXGPU_TRANSFER_REQUEST_SIZE, &rec);
+    if (result != MX_OK) return result;
+    if (rec.data_bytes > UINT32_MAX - MXGPU_TRANSFER_REQUEST_SIZE ||
+        len != MXGPU_TRANSFER_REQUEST_SIZE + rec.data_bytes) return MX_ERR_LENGTH;
     *out = rec;
     if (data)
         *data = in + MXGPU_TRANSFER_REQUEST_SIZE;
@@ -981,6 +1019,8 @@ int mxgpu_shader_create_encode(uint32_t shader_id, const uint8_t *bytecode, uint
     uint32_t total;
     if (shader_id == 0 || !bytecode || bytecode_len == 0 || (bytecode_len & 3u))
         return fail(out_len, MX_ERR_SHADER);
+    if (bytecode_len > UINT32_MAX - MXGPU_SHADER_CREATE_HEADER_SIZE)
+        return fail(out_len, MX_ERR_LENGTH);
     total = MXGPU_SHADER_CREATE_HEADER_SIZE + bytecode_len;
     if (out_len)
         *out_len = 0;
@@ -992,6 +1032,45 @@ int mxgpu_shader_create_encode(uint32_t shader_id, const uint8_t *bytecode, uint
     memcpy(out + MXGPU_SHADER_CREATE_HEADER_SIZE, bytecode, bytecode_len);
     if (out_len)
         *out_len = total;
+    return MX_OK;
+}
+
+int mxgpu_shader_create_decode(const uint8_t *in, uint32_t len, uint32_t max_shader_bytes,
+                               struct mxgpu_shader_create *out)
+{
+    struct mxgpu_shader_create rec;
+    if (!codec_span(in, len) || !codec_span(out, sizeof(*out)) ||
+        codec_overlap(in, len, out, sizeof(*out))) return MX_ERR_STATE;
+    if (len < MXGPU_SHADER_CREATE_HEADER_SIZE) return MX_ERR_LENGTH;
+    memset(&rec, 0, sizeof(rec));
+    rec.shader_id = mx_r32(in, 0); rec.bytecode_bytes = mx_r32(in, 4);
+    if (mx_r32(in, 8) || mx_r32(in, 12)) return MX_ERR_RESERVED;
+    if (!rec.shader_id || !rec.bytecode_bytes || (rec.bytecode_bytes & 3u)) return MX_ERR_SHADER;
+    if (rec.bytecode_bytes > max_shader_bytes ||
+        rec.bytecode_bytes != len - MXGPU_SHADER_CREATE_HEADER_SIZE) return MX_ERR_LENGTH;
+    rec.bytecode = in + MXGPU_SHADER_CREATE_HEADER_SIZE;
+    *out = rec;
+    return MX_OK;
+}
+
+int mxgpu_pipeline_create_decode(const uint8_t *in, uint32_t len,
+                                 struct mxgpu_pipeline_create *out)
+{
+    struct mxgpu_pipeline_create rec;
+    uint8_t encoded[MXGPU_PIPELINE_CREATE_SIZE];
+    uint32_t written;
+    int result;
+    if (!codec_span(in, len) || !codec_span(out, sizeof(*out)) ||
+        codec_overlap(in, len, out, sizeof(*out))) return MX_ERR_STATE;
+    if (len != MXGPU_PIPELINE_CREATE_SIZE) return MX_ERR_LENGTH;
+    if (mx_r32(in, 20) || mx_r64(in, 24)) return MX_ERR_RESERVED;
+    memset(&rec, 0, sizeof(rec));
+    rec.pipeline_id = mx_r32(in, 0); rec.kind = mx_r16(in, 4); rec.color_format = mx_r16(in, 6);
+    rec.shader_id = mx_r32(in, 8); rec.first_entry = mx_r32(in, 12); rec.second_entry = mx_r32(in, 16);
+    result = mxgpu_pipeline_create_encode(rec.pipeline_id, rec.kind, rec.color_format,
+        rec.shader_id, rec.first_entry, rec.second_entry, encoded, sizeof(encoded), &written);
+    if (result != MX_OK) return result;
+    *out = rec;
     return MX_OK;
 }
 

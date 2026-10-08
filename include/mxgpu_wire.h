@@ -586,11 +586,30 @@ int mxgpu_transfer_encode(const struct mxgpu_transfer *in, const uint8_t *data, 
                           uint32_t cap, uint32_t *out_len);
 int mxgpu_transfer_decode(const uint8_t *in, uint32_t len, struct mxgpu_transfer *out,
                           const uint8_t **data);
+/* Request-only transfers carry no inline data. Resource bounds are checked separately. */
+int mxgpu_transfer_request_encode(const struct mxgpu_transfer *in, uint8_t *out,
+                                  uint32_t cap, uint32_t *out_len);
+int mxgpu_transfer_request_decode(const uint8_t *in, uint32_t len, struct mxgpu_transfer *out);
 int mxgpu_binding_encode(const struct mxgpu_execution_binding *in, uint8_t *out, uint32_t cap,
                          uint32_t *out_len);
 int mxgpu_binding_decode(const uint8_t *in, uint32_t len, struct mxgpu_execution_binding *out);
 int mxgpu_shader_create_encode(uint32_t shader_id, const uint8_t *bytecode, uint32_t bytecode_len,
                                uint8_t *out, uint32_t cap, uint32_t *out_len);
+struct mxgpu_shader_create {
+    uint32_t shader_id, bytecode_bytes;
+    const uint8_t *bytecode;
+};
+/* Bytecode borrows the input storage, which must remain immutable while used.
+ * Output must not overlap input. Failures leave output unchanged. */
+int mxgpu_shader_create_decode(const uint8_t *in, uint32_t len, uint32_t max_shader_bytes,
+                               struct mxgpu_shader_create *out);
+struct mxgpu_pipeline_create {
+    uint32_t pipeline_id;
+    uint16_t kind, color_format;
+    uint32_t shader_id, first_entry, second_entry;
+};
+int mxgpu_pipeline_create_decode(const uint8_t *in, uint32_t len,
+                                 struct mxgpu_pipeline_create *out);
 int mxgpu_pipeline_create_encode(uint32_t pipeline_id, uint16_t kind, uint16_t color_format,
                                  uint32_t shader_id, uint32_t first_entry, uint32_t second_entry,
                                  uint8_t *out, uint32_t cap, uint32_t *out_len);

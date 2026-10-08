@@ -6,6 +6,79 @@
 
 #include <string.h>
 
+static int clipboard_span(const void *pointer, uintptr_t bytes)
+{
+    return (!bytes || pointer) && bytes <= UINTPTR_MAX - (uintptr_t)pointer;
+}
+
+static int clipboard_overlap(const void *left, uintptr_t left_bytes, const void *right, uintptr_t right_bytes)
+{
+    uintptr_t a = (uintptr_t)left, b = (uintptr_t)right;
+    return left_bytes && right_bytes && a < b + right_bytes && b < a + left_bytes;
+}
+
+static int clipboard_text_valid(const uint8_t *text, uint32_t bytes)
+{
+    uint32_t i = 0;
+    if (bytes && !text) return MXGA_ERR_PAYLOAD;
+    while (i < bytes) {
+        uint32_t scalar, minimum, continuation;
+        uint8_t lead = text[i++];
+        if (lead < 0x80u) continue;
+        if (lead >= 0xc2u && lead <= 0xdfu) { scalar = lead & 0x1fu; minimum = 0x80u; continuation = 1; }
+        else if (lead >= 0xe0u && lead <= 0xefu) { scalar = lead & 0x0fu; minimum = 0x800u; continuation = 2; }
+        else if (lead >= 0xf0u && lead <= 0xf4u) { scalar = lead & 7u; minimum = 0x10000u; continuation = 3; }
+        else return MXGA_ERR_UTF8;
+        if (continuation > bytes - i) return MXGA_ERR_UTF8;
+        while (continuation--) {
+            uint8_t next = text[i++];
+            if ((next & 0xc0u) != 0x80u) return MXGA_ERR_UTF8;
+            scalar = (scalar << 6) | (next & 0x3fu);
+        }
+        if (scalar < minimum || scalar > 0x10ffffu || (scalar >= 0xd800u && scalar <= 0xdfffu)) return MXGA_ERR_UTF8;
+    }
+    return MXGA_OK;
+}
+
+int mxga_encode_clipboard(uint64_t origin, uint64_t generation, const uint8_t *text,
+                          uint32_t text_bytes, uint8_t *out, uint32_t cap, uint32_t *out_len)
+{
+    int status;
+    uint32_t total;
+    if (!clipboard_span(text, text_bytes) || !clipboard_span(out, cap) ||
+        (out_len && (!clipboard_span(out_len, sizeof(*out_len)) ||
+            clipboard_overlap(out_len, sizeof(*out_len), text, text_bytes) ||
+            clipboard_overlap(out_len, sizeof(*out_len), out, cap)))) return MXGA_ERR_PAYLOAD;
+    if (out_len) *out_len = 0;
+    if (text_bytes > MXGA_CLIPBOARD_MAX_TEXT_BYTES) return MXGA_ERR_LENGTH;
+    status = clipboard_text_valid(text, text_bytes);
+    if (status != MXGA_OK) return status;
+    total = MXGA_CLIPBOARD_METADATA_BYTES + text_bytes;
+    if (!out || cap < total) return MXGA_ERR_LENGTH;
+    if (text_bytes) memmove(out + MXGA_CLIPBOARD_METADATA_BYTES, text, text_bytes);
+    mx_w64(out, 0, origin); mx_w64(out, 8, generation);
+    if (out_len) *out_len = total;
+    return MXGA_OK;
+}
+
+int mxga_decode_clipboard(const uint8_t *payload, uint32_t len, struct mxga_clipboard *out)
+{
+    int status;
+    struct mxga_clipboard decoded;
+    if (!clipboard_span(payload, len) || !clipboard_span(out, sizeof(*out)) ||
+        clipboard_overlap(payload, len, out, sizeof(*out))) return MXGA_ERR_PAYLOAD;
+    if (!payload || !out || len < MXGA_CLIPBOARD_METADATA_BYTES) return MXGA_ERR_LENGTH;
+    if (len > MXGA_MAX_FRAME_BYTES - MXGA_HEADER_BYTES) return MXGA_ERR_LENGTH;
+    memset(&decoded, 0, sizeof(decoded));
+    decoded.text_bytes = len - MXGA_CLIPBOARD_METADATA_BYTES;
+    decoded.text = payload + MXGA_CLIPBOARD_METADATA_BYTES;
+    status = clipboard_text_valid(decoded.text, decoded.text_bytes);
+    if (status != MXGA_OK) return status;
+    decoded.origin = mx_r64(payload, 0); decoded.generation = mx_r64(payload, 8);
+    *out = decoded;
+    return MXGA_OK;
+}
+
 int mxga_encode_frame(uint16_t minor, uint16_t opcode, uint64_t sequence, const uint8_t *payload,
                       uint32_t payload_len, uint8_t *out, uint32_t cap, uint32_t *out_len)
 {
