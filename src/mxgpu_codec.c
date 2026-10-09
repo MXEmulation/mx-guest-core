@@ -45,41 +45,41 @@ int mxgpu_f32_finite(uint32_t bits)
 uint32_t mxgpu_format_bytes_per_pixel(uint16_t format)
 {
     switch (format) {
-    case 1:
-    case 20:
-    case 21:
+    case MXGPU_FMT_R8_UNORM:
+    case MXGPU_FMT_R8_UINT:
+    case MXGPU_FMT_R8_SINT:
         return 1;
-    case 7:
-    case 15:
-    case 22:
-    case 23:
+    case MXGPU_FMT_RG8_UNORM:
+    case MXGPU_FMT_R16_FLOAT:
+    case MXGPU_FMT_R16_UINT:
+    case MXGPU_FMT_R16_SINT:
         return 2;
-    case 2:
-    case 3:
-    case 5:
-    case 6:
-    case 9:
-    case 10:
-    case 11:
-    case 12:
-    case 13:
-    case 16:
-    case 17:
-    case 19:
-    case 24:
-    case 25:
-    case 26:
-    case 27:
+    case MXGPU_FMT_RGBA8_UNORM:
+    case MXGPU_FMT_BGRA8_UNORM:
+    case MXGPU_FMT_RGBA8_UNORM_SRGB:
+    case MXGPU_FMT_BGRA8_UNORM_SRGB:
+    case MXGPU_FMT_R11G11B10_FLOAT:
+    case MXGPU_FMT_R9G9B9E5_FLOAT:
+    case MXGPU_FMT_RGBA8_SNORM:
+    case MXGPU_FMT_RGB10A2_UNORM:
+    case MXGPU_FMT_DEPTH32_FLOAT:
+    case MXGPU_FMT_RG16_FLOAT:
+    case MXGPU_FMT_R32_FLOAT:
+    case MXGPU_FMT_DEPTH24_UNORM_STENCIL8:
+    case MXGPU_FMT_R32_UINT:
+    case MXGPU_FMT_R32_SINT:
+    case MXGPU_FMT_RGBA8_UINT:
+    case MXGPU_FMT_RGBA8_SINT:
         return 4;
-    case 4:
-    case 14:
-    case 18:
-    case 28:
-    case 29:
+    case MXGPU_FMT_RGBA16_FLOAT:
+    case MXGPU_FMT_DEPTH32_FLOAT_STENCIL8:
+    case MXGPU_FMT_RG32_FLOAT:
+    case MXGPU_FMT_RGBA16_UINT:
+    case MXGPU_FMT_RGBA16_SINT:
         return 8;
-    case 8:
-    case 30:
-    case 31:
+    case MXGPU_FMT_RGBA32_FLOAT:
+    case MXGPU_FMT_RGBA32_UINT:
+    case MXGPU_FMT_RGBA32_SINT:
         return 16;
     default:
         return 0;
@@ -88,7 +88,7 @@ uint32_t mxgpu_format_bytes_per_pixel(uint16_t format)
 
 static int known_format(uint16_t format)
 {
-    return format >= 1 && format <= 31;
+    return format >= 1 && format <= MXGPU_FMT_COUNT;
 }
 
 int mxgpu_opcode_queue(uint16_t opcode, uint16_t *queue)

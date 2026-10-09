@@ -461,6 +461,39 @@ static void test_roundtrip(const char *dir)
     expect(mxgpu_present_decode(out, n, &present, &damage, 1) == MX_OK, "present decode");
 
     expect(mxgpu_format_bytes_per_pixel(MXGPU_FMT_RGBA8_UNORM) == 4, "rgba8 size");
+    {
+        static const struct {
+            uint16_t format, value;
+            uint32_t bytes;
+        } formats[] = {
+            {MXGPU_FMT_R8_UNORM, 1, 1}, {MXGPU_FMT_RGBA8_UNORM, 2, 4}, {MXGPU_FMT_BGRA8_UNORM, 3, 4},
+            {MXGPU_FMT_RGBA16_FLOAT, 4, 8}, {MXGPU_FMT_RGBA8_UNORM_SRGB, 5, 4},
+            {MXGPU_FMT_BGRA8_UNORM_SRGB, 6, 4}, {MXGPU_FMT_RG8_UNORM, 7, 2}, {MXGPU_FMT_RGBA32_FLOAT, 8, 16},
+            {MXGPU_FMT_R11G11B10_FLOAT, 9, 4}, {MXGPU_FMT_R9G9B9E5_FLOAT, 10, 4},
+            {MXGPU_FMT_RGBA8_SNORM, 11, 4}, {MXGPU_FMT_RGB10A2_UNORM, 12, 4}, {MXGPU_FMT_DEPTH32_FLOAT, 13, 4},
+            {MXGPU_FMT_DEPTH32_FLOAT_STENCIL8, 14, 8}, {MXGPU_FMT_R16_FLOAT, 15, 2},
+            {MXGPU_FMT_RG16_FLOAT, 16, 4}, {MXGPU_FMT_R32_FLOAT, 17, 4}, {MXGPU_FMT_RG32_FLOAT, 18, 8},
+            {MXGPU_FMT_DEPTH24_UNORM_STENCIL8, 19, 4}, {MXGPU_FMT_R8_UINT, 20, 1}, {MXGPU_FMT_R8_SINT, 21, 1},
+            {MXGPU_FMT_R16_UINT, 22, 2}, {MXGPU_FMT_R16_SINT, 23, 2}, {MXGPU_FMT_R32_UINT, 24, 4},
+            {MXGPU_FMT_R32_SINT, 25, 4}, {MXGPU_FMT_RGBA8_UINT, 26, 4}, {MXGPU_FMT_RGBA8_SINT, 27, 4},
+            {MXGPU_FMT_RGBA16_UINT, 28, 8}, {MXGPU_FMT_RGBA16_SINT, 29, 8}, {MXGPU_FMT_RGBA32_UINT, 30, 16},
+            {MXGPU_FMT_RGBA32_SINT, 31, 16},
+        };
+        struct mxgpu_adapter_info adapter = {64u << 20, 16384, 0, 4096, 1};
+        uint32_t mask = 0;
+        expect(sizeof formats / sizeof formats[0] == MXGPU_FMT_COUNT, "every wire format named");
+        for (unsigned i = 0; i < sizeof formats / sizeof formats[0]; i++) {
+            expect(formats[i].format == formats[i].value, "format discriminant");
+            expect(mxgpu_format_bytes_per_pixel(formats[i].format) == formats[i].bytes, "format storage size");
+            mask |= 1u << (formats[i].format - 1u);
+        }
+        expect(mxgpu_format_bytes_per_pixel(MXGPU_FMT_COUNT + 1u) == 0, "format past the wire range");
+        adapter.pixel_format_mask = mask;
+        expect(mxgpu_adapter_info_encode(&adapter, out, sizeof out, &n) == MX_OK, "adapter names every format");
+        adapter.pixel_format_mask = mask | (1u << MXGPU_FMT_COUNT);
+        expect(mxgpu_adapter_info_encode(&adapter, out, sizeof out, &n) == MX_ERR_RANGE,
+               "adapter format past the wire range refused");
+    }
     expect(MXGPU_FEAT_KNOWN == 0xfffffffffffull, "feature mask");
     expect(MXGPU_PROTOCOL_MAGIC == 0x5047584du, "magic");
     expect(MXSB_VERSION_MINOR == 72, "mxsb minor");
