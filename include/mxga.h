@@ -180,4 +180,217 @@ int mxga_encode_integration_action(const struct mxga_integration_action *action,
 int mxga_decode_integration_action(const uint8_t *payload, uint32_t len,
                                    struct mxga_integration_action *action);
 
+#define MXGA_OP_NETWORK_INFO 7u
+#define MXGA_OP_SHARE_STATUS 8u
+#define MXGA_OP_FS_REQUEST 9u
+#define MXGA_OP_MOUNT_SHARE 0x103u
+#define MXGA_OP_UNMOUNT_SHARE 0x104u
+#define MXGA_OP_FS_RESPONSE 0x105u
+
+#define MXGA_CAP_NETWORK_INFO (1ull << 6)
+#define MXGA_CAP_FOLDER_SHARING (1ull << 7)
+
+#define MXGA_NETWORK_HEADER_BYTES 8u
+#define MXGA_NETWORK_INTERFACE_BYTES 28u
+#define MXGA_NETWORK_ADDRESS_BYTES 20u
+#define MXGA_NETWORK_NAME_BYTES 16u
+#define MXGA_NETWORK_MAC_BYTES 6u
+#define MXGA_NETWORK_MAX_INTERFACES 64u
+#define MXGA_NETWORK_MAX_ADDRESSES 32u
+#define MXGA_NETWORK_FLAG_UP (1u << 0)
+#define MXGA_NETWORK_FLAG_RUNNING (1u << 1)
+#define MXGA_NETWORK_FLAG_LOOPBACK (1u << 2)
+#define MXGA_NETWORK_FLAG_POINT_TO_POINT (1u << 3)
+#define MXGA_NETWORK_FLAGS_KNOWN                                                                   \
+    (MXGA_NETWORK_FLAG_UP | MXGA_NETWORK_FLAG_RUNNING | MXGA_NETWORK_FLAG_LOOPBACK |               \
+     MXGA_NETWORK_FLAG_POINT_TO_POINT)
+#define MXGA_NETWORK_FAMILY_IPV4 4u
+#define MXGA_NETWORK_FAMILY_IPV6 6u
+
+struct mxga_network_address {
+    uint8_t family;
+    uint8_t prefix_length;
+    uint8_t address[16];
+};
+
+/* name is NUL-padded UTF-8 and may fill all 16 bytes. */
+struct mxga_network_interface {
+    uint8_t name[MXGA_NETWORK_NAME_BYTES];
+    uint8_t mac[MXGA_NETWORK_MAC_BYTES];
+    uint16_t flags;
+    uint32_t address_count;
+    const struct mxga_network_address *addresses;
+};
+
+int mxga_encode_network_info(const struct mxga_network_interface *interfaces, uint32_t count,
+                             uint8_t *out, uint32_t cap, uint32_t *out_len);
+/* Interface address views point into the caller-owned addresses array. */
+int mxga_decode_network_info(const uint8_t *payload, uint32_t len,
+                             struct mxga_network_interface *interfaces, uint32_t interface_cap,
+                             struct mxga_network_address *addresses, uint32_t address_cap,
+                             uint32_t *count);
+
+#define MXGA_SHARE_NAME_BYTES 64u
+#define MXGA_SHARE_PATH_BYTES 256u
+#define MXGA_SHARE_MAX 32u
+#define MXGA_SHARE_MOUNT_BYTES 328u
+#define MXGA_SHARE_UNMOUNT_BYTES 8u
+#define MXGA_SHARE_STATUS_HEADER_BYTES 8u
+#define MXGA_SHARE_STATUS_RECORD_BYTES 336u
+#define MXGA_SHARE_FLAG_READ_ONLY (1u << 0)
+#define MXGA_SHARE_FLAG_AUTOMOUNT (1u << 1)
+#define MXGA_SHARE_FLAGS_KNOWN (MXGA_SHARE_FLAG_READ_ONLY | MXGA_SHARE_FLAG_AUTOMOUNT)
+#define MXGA_SHARE_STATE_UNMOUNTED 0u
+#define MXGA_SHARE_STATE_MOUNTED 1u
+#define MXGA_SHARE_STATE_FAILED 2u
+
+/* Decoded text is copied and NUL-terminated; name_bytes is 1 to 64, mount_point_bytes 0 to 256. */
+struct mxga_share_mount {
+    uint32_t share_id;
+    uint32_t flags;
+    char name[MXGA_SHARE_NAME_BYTES + 1];
+    uint32_t name_bytes;
+    char mount_point[MXGA_SHARE_PATH_BYTES + 1];
+    uint32_t mount_point_bytes;
+};
+
+/* error is a negated errno when state is FAILED and zero otherwise. */
+struct mxga_share_status {
+    uint32_t share_id;
+    uint32_t state;
+    int32_t error;
+    uint32_t flags;
+    const uint8_t *name;
+    uint32_t name_bytes;
+    const uint8_t *mount_point;
+    uint32_t mount_point_bytes;
+};
+
+int mxga_encode_mount_share(const struct mxga_share_mount *mount, uint8_t *out, uint32_t cap,
+                            uint32_t *out_len);
+int mxga_decode_mount_share(const uint8_t *payload, uint32_t len, struct mxga_share_mount *mount);
+int mxga_encode_unmount_share(uint32_t share_id, uint8_t *out, uint32_t cap, uint32_t *out_len);
+int mxga_decode_unmount_share(const uint8_t *payload, uint32_t len, uint32_t *share_id);
+int mxga_encode_share_status(const struct mxga_share_status *shares, uint32_t count, uint8_t *out,
+                             uint32_t cap, uint32_t *out_len);
+/* Decoded text views borrow payload and exclude NUL padding. */
+int mxga_decode_share_status(const uint8_t *payload, uint32_t len,
+                             struct mxga_share_status *shares, uint32_t share_cap,
+                             uint32_t *count);
+
+#define MXGA_FS_REQUEST_HEADER_BYTES 56u
+#define MXGA_FS_RESPONSE_HEADER_BYTES 32u
+#define MXGA_FS_MAX_PATH_BYTES 4096u
+#define MXGA_FS_MAX_NAME_BYTES 255u
+#define MXGA_FS_MAX_IO_BYTES (512u * 1024u)
+#define MXGA_FS_MAX_RESPONSE_DATA_BYTES                                                            \
+    (MXGA_MAX_FRAME_BYTES - MXGA_HEADER_BYTES - MXGA_FS_RESPONSE_HEADER_BYTES)
+#define MXGA_FS_ATTRIBUTES_BYTES 80u
+#define MXGA_FS_STATFS_BYTES 56u
+#define MXGA_FS_DIRENT_HEADER_BYTES 16u
+
+#define MXGA_FS_OP_STATFS 1u
+#define MXGA_FS_OP_GETATTR 2u
+#define MXGA_FS_OP_READDIR 3u
+#define MXGA_FS_OP_OPEN 4u
+#define MXGA_FS_OP_READ 5u
+#define MXGA_FS_OP_WRITE 6u
+#define MXGA_FS_OP_CREATE 7u
+#define MXGA_FS_OP_MKDIR 8u
+#define MXGA_FS_OP_UNLINK 9u
+#define MXGA_FS_OP_RMDIR 10u
+#define MXGA_FS_OP_RENAME 11u
+#define MXGA_FS_OP_TRUNCATE 12u
+#define MXGA_FS_OP_RELEASE 13u
+#define MXGA_FS_OP_FSYNC 14u
+#define MXGA_FS_OP_SETATTR 15u
+#define MXGA_FS_OP_READLINK 16u
+
+#define MXGA_FS_OPEN_READ (1u << 0)
+#define MXGA_FS_OPEN_WRITE (1u << 1)
+#define MXGA_FS_OPEN_APPEND (1u << 2)
+#define MXGA_FS_OPEN_TRUNCATE (1u << 3)
+#define MXGA_FS_OPEN_CREATE (1u << 4)
+#define MXGA_FS_OPEN_EXCLUSIVE (1u << 5)
+#define MXGA_FS_OPEN_DIRECTORY (1u << 6)
+#define MXGA_FS_OPEN_KNOWN 0x7fu
+
+#define MXGA_FS_SETATTR_MODE (1u << 0)
+#define MXGA_FS_SETATTR_UID (1u << 1)
+#define MXGA_FS_SETATTR_GID (1u << 2)
+#define MXGA_FS_SETATTR_SIZE (1u << 3)
+#define MXGA_FS_SETATTR_ATIME (1u << 4)
+#define MXGA_FS_SETATTR_MTIME (1u << 5)
+#define MXGA_FS_SETATTR_KNOWN 0x3fu
+
+struct mxga_fs_request {
+    uint64_t request_id;
+    uint64_t handle;
+    uint64_t offset;
+    uint32_t share_id;
+    uint32_t operation;
+    uint32_t length;
+    uint32_t flags;
+    uint32_t mode;
+    const uint8_t *path;
+    uint32_t path_bytes;
+    const uint8_t *second_path;
+    uint32_t second_path_bytes;
+    const uint8_t *data;
+    uint32_t data_bytes;
+};
+
+struct mxga_fs_response {
+    uint64_t request_id;
+    uint64_t handle;
+    int32_t status;
+    uint32_t operation;
+    const uint8_t *data;
+    uint32_t data_bytes;
+};
+
+struct mxga_fs_attributes {
+    uint64_t ino, size, blocks;
+    uint64_t atime_s, mtime_s, ctime_s;
+    uint32_t atime_ns, mtime_ns, ctime_ns;
+    uint32_t mode, uid, gid, nlink;
+};
+
+struct mxga_fs_statfs {
+    uint64_t block_size, blocks, blocks_free, blocks_available, files, files_free, name_max;
+};
+
+struct mxga_fs_dirent {
+    uint64_t inode;
+    uint32_t mode;
+    const uint8_t *name;
+    uint32_t name_bytes;
+};
+
+/* A share-relative path: UTF-8, no NUL or backslash, no leading '/', no empty, "." or ".."
+ * component, each component at most 255 bytes. The empty path names the share root. */
+int mxga_fs_path_valid(const uint8_t *path, uint32_t bytes);
+/* Refuses any request whose operation, flags, path presence or lengths break the contract. */
+int mxga_encode_fs_request(const struct mxga_fs_request *request, uint8_t *out, uint32_t cap,
+                           uint32_t *out_len);
+/* Decoded paths and data borrow payload. */
+int mxga_decode_fs_request(const uint8_t *payload, uint32_t len, struct mxga_fs_request *request);
+int mxga_encode_fs_response(const struct mxga_fs_response *response, uint8_t *out, uint32_t cap,
+                            uint32_t *out_len);
+/* Decoded data borrows payload. status is zero or a negated errno. */
+int mxga_decode_fs_response(const uint8_t *payload, uint32_t len,
+                            struct mxga_fs_response *response);
+int mxga_encode_fs_attributes(const struct mxga_fs_attributes *attributes, uint8_t *out,
+                              uint32_t cap, uint32_t *out_len);
+int mxga_decode_fs_attributes(const uint8_t *data, uint32_t len,
+                              struct mxga_fs_attributes *attributes);
+int mxga_encode_fs_statfs(const struct mxga_fs_statfs *statfs, uint8_t *out, uint32_t cap,
+                          uint32_t *out_len);
+int mxga_decode_fs_statfs(const uint8_t *data, uint32_t len, struct mxga_fs_statfs *statfs);
+int mxga_encode_fs_dirent(const struct mxga_fs_dirent *entry, uint8_t *out, uint32_t cap,
+                          uint32_t *out_len);
+/* Decodes the entry at *cursor and advances it; the name borrows data. */
+int mxga_decode_fs_dirent(const uint8_t *data, uint32_t len, uint32_t *cursor,
+                          struct mxga_fs_dirent *entry);
+
 #endif

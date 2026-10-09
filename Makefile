@@ -12,7 +12,7 @@ HEADERS = $(filter %.h,$(MANIFEST))
 
 .PHONY: test clean
 
-test: build/test_protocol build/test_mxga build/test_mxga_integration build/test_cursor build/test_render_decode build/test_mxsb_verify build/test_mxio build/test_aperture build/test_vertex build/test_stage_interface build/test_creation_decode build/test_mxga_clipboard build/test_compute
+test: build/test_protocol build/test_mxga build/test_mxga_integration build/test_cursor build/test_render_decode build/test_mxsb_verify build/test_mxio build/test_aperture build/test_vertex build/test_stage_interface build/test_creation_decode build/test_mxga_clipboard build/test_compute build/test_mxga_share
 	./build/test_protocol tests/fixtures
 	./build/test_mxga
 	./build/test_mxga_integration
@@ -26,10 +26,15 @@ test: build/test_protocol build/test_mxga build/test_mxga_integration build/test
 	./build/test_creation_decode
 	./build/test_mxga_clipboard
 	./build/test_compute
+	./build/test_mxga_share
 
 build/test_compute: tests/test_compute.c src/mxgpu_codec.c src/mxsb_codec.c $(HEADERS) sources.list
 	mkdir -p build
 	$(CC) $(CPPFLAGS) $(CFLAGS) tests/test_compute.c src/mxgpu_codec.c src/mxsb_codec.c $(LDFLAGS) -o $@
+
+build/test_mxga_share: tests/test_mxga_share.c src/mxga_share.c $(HEADERS) sources.list
+	mkdir -p build
+	$(CC) $(CPPFLAGS) $(CFLAGS) tests/test_mxga_share.c src/mxga_share.c $(LDFLAGS) -o $@
 
 build/test_mxga_clipboard: tests/test_mxga_clipboard.c src/mxga_codec.c $(HEADERS) sources.list
 	mkdir -p build
